@@ -18,6 +18,9 @@ on:
       video_desc:
         description: 'Video description'
         required: false
+      caption_style:
+        description: 'Caption style (default, humor, none)'
+        required: false
 
 jobs:
   process:
@@ -88,8 +91,8 @@ jobs:
           TASK_ID: ${{ github.event.client_payload.task_id || inputs.task_id }}
           CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id }}
           VIDEO_DESC: ${{ github.event.client_payload.video_desc || inputs.video_desc }}
+          CAPTION_STYLE: ${{ github.event.client_payload.caption_style || inputs.caption_style || 'default' }}
           GENERATE_AI_CAPTION: "true"
-          CAPTION_STYLE: "default"
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
