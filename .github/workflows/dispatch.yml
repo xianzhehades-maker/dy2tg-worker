@@ -41,7 +41,8 @@ jobs:
         run: |
           # 下载最新的 Xray
           curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
-          unzip xray.zip
+          # 解压，自动覆盖已有文件
+          unzip -o xray.zip
           # 后台启动，并把日志存起来方便报错查看
           ./xray -c config.json > xray_log.txt 2>&1 &
           # 给一点启动时间
