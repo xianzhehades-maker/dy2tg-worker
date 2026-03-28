@@ -22,7 +22,19 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg net-tools
+
+      - name: Setup Xray Proxy
+        run: |
+          # 下载最新的 Xray
+          curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip xray.zip
+          # 后台启动，并把日志存起来方便报错查看
+          ./xray -c config.json > xray_log.txt 2>&1 &
+          # 给一点启动时间
+          sleep 5
+          # 检查 1080 端口是否开了
+          netstat -tuln | grep 1080 || echo "Port check completed"
 
       - name: Install dependencies
         run: |
@@ -34,5 +46,10 @@ jobs:
           DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
           GH_REPO: ${{ github.repository }}
           GH_PAT: ${{ secrets.GH_PAT }}
+          PROXY_URL: http://127.0.0.1:1080
         run: |
           python .github/workflows/poll_up.py
+
+      - name: Check Xray Log if Failed
+        if: failure()
+        run: cat xray_log.txt
