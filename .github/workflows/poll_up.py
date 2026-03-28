@@ -19,6 +19,7 @@ GH_REPO = os.getenv("GH_REPO", "")
 GH_PAT = os.getenv("GH_PAT", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DOUYIN_COOKIE = os.getenv("DOUYIN_COOKIE", "")
+PROXY_URL = os.getenv("PROXY_URL", "")
 
 # 把 tiktok_downloader 目录加到 sys.path 里，这样可以直接导入 src
 TIKTOK_DOWNLOADER_DIR = str(Path(__file__).resolve().parent.parent.parent / "tiktok_downloader")
@@ -187,7 +188,7 @@ async def fetch_user_videos(sec_user_id: str):
             account = Account(
                 params,
                 cookie=updated_cookie,
-                proxy=None,
+                proxy=PROXY_URL if PROXY_URL else None,
                 sec_user_id=sec_user_id,
                 tab="post",
                 cursor=0,
