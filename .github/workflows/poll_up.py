@@ -109,11 +109,13 @@ async def fetch_user_videos(sec_user_id: str):
     """获取UP主页视频列表 - 使用 TikTokDownloader 项目（抖音版）"""
     try:
         from src.testers.params import Params
+        from src.testers.logger import Logger
         from src.interface.account import Account  # 注意：这里用 Account（抖音的），不是 AccountTikTok（TikTok 的）
         from src.interface import API
         from src.extract.extractor import Extractor
         from src.tools.format import cookie_str_to_dict
         from src.encrypt.msToken import MsToken
+        from src.custom import PARAMS_HEADERS
         
         # 创建一个 dummy recorder 类，只需要有 save 方法和 field_keys 属性
         class DummyRecorder:
@@ -133,13 +135,31 @@ async def fetch_user_videos(sec_user_id: str):
                 # 从 cookie 字符串中提取 msToken 和 uifid（同时尝试大小写）
                 cookie_dict = cookie_str_to_dict(DOUYIN_COOKIE)
                 
-                # 提取 msToken（同时尝试大小写，如果没有就生成假的）
+                # 提取 msToken（同时尝试大小写，如果没有就获取真实的）
                 ms_token = cookie_dict.get("msToken") or cookie_dict.get("mstoken") or cookie_dict.get("MSTOKEN")
                 if not ms_token:
-                    # 如果 cookie 里没有 msToken，就生成一个假的
-                    fake_ms_token = MsToken.get_fake_ms_token()
-                    ms_token = fake_ms_token["msToken"]
-                    logger.info(f"从 cookie 中未找到 msToken，已生成假的 msToken: {ms_token[:20]}...")
+                    # 如果 cookie 里没有 msToken，就获取真实的 msToken
+                    logger.info("从 cookie 中未找到 msToken，正在获取真实的 msToken...")
+                    try:
+                        real_ms_token = await MsToken.get_long_ms_token(
+                            Logger(),
+                            PARAMS_HEADERS,
+                            proxy=None
+                        )
+                        if real_ms_token and "msToken" in real_ms_token:
+                            ms_token = real_ms_token["msToken"]
+                            logger.info(f"已获取到真实的 msToken: {ms_token[:20]}...")
+                        else:
+                            # 如果获取失败，就生成假的
+                            fake_ms_token = MsToken.get_fake_ms_token()
+                            ms_token = fake_ms_token["msToken"]
+                            logger.info(f"获取真实 msToken 失败，已生成假的 msToken: {ms_token[:20]}...")
+                    except Exception as e:
+                        logger.warning(f"获取真实 msToken 时出错: {e}")
+                        # 如果出错，就生成假的
+                        fake_ms_token = MsToken.get_fake_ms_token()
+                        ms_token = fake_ms_token["msToken"]
+                        logger.info(f"已生成假的 msToken: {ms_token[:20]}...")
                 params.msToken = ms_token
                 API.params["msToken"] = ms_token
                 
