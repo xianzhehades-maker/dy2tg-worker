@@ -58,6 +58,17 @@ jobs:
         run: |
           pip install --no-cache-dir -r requirements_hf.txt
 
+      - name: Test Proxy
+        run: |
+          echo "=== Testing proxy connection ==="
+          # 测试不使用代理访问
+          echo "--- Testing without proxy ---"
+          curl -I --connect-timeout 10 https://www.douyin.com 2>&1 || echo "Failed to connect without proxy"
+          # 测试使用代理访问
+          echo "--- Testing with proxy ---"
+          curl -I --proxy http://127.0.0.1:1080 --connect-timeout 10 https://www.douyin.com 2>&1 || echo "Failed to connect with proxy"
+          echo "=== Proxy test complete ==="
+
       - name: Poll UPs and dispatch new videos
         env:
           WORKERS_URL: ${{ secrets.WORKERS_URL }}
