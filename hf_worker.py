@@ -744,12 +744,15 @@ async def process_video_cli():
     task_id = os.getenv("TASK_ID")
     chat_id = os.getenv("CHAT_ID")
     video_desc = os.getenv("VIDEO_DESC", "")
+    generate_ai_caption = os.getenv("GENERATE_AI_CAPTION", "false").lower() == "true"
+    caption_style = os.getenv("CAPTION_STYLE", "")
 
     if not video_url or not task_id:
         logger.error("缺少 VIDEO_URL 或 TASK_ID 环境变量")
         return False
 
     logger.info(f"开始处理视频: {video_url}, task_id: {task_id}")
+    logger.info(f"AI文案生成: {'启用' if generate_ai_caption else '禁用'}, 文案风格: {caption_style or '默认'}")
 
     try:
         chat_id_int = int(chat_id) if chat_id else 0
@@ -760,8 +763,9 @@ async def process_video_cli():
             chat_id=chat_id_int,
             caption=None,
             watermark_text=None,
-            generate_ai_caption=False,
-            video_desc=video_desc or None
+            generate_ai_caption=generate_ai_caption,
+            video_desc=video_desc or None,
+            caption_style=caption_style or None
         )
 
         return True

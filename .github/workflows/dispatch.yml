@@ -88,6 +88,8 @@ jobs:
           TASK_ID: ${{ github.event.client_payload.task_id || inputs.task_id }}
           CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id }}
           VIDEO_DESC: ${{ github.event.client_payload.video_desc || inputs.video_desc }}
+          GENERATE_AI_CAPTION: "true"
+          CAPTION_STYLE: "default"
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -95,6 +97,7 @@ jobs:
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
           WORKERS_URL: ${{ secrets.WORKERS_URL }}
           DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           PROXY_URL: http://127.0.0.1:1080
           GITHUB_ACTIONS: "true"
         run: |
