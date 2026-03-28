@@ -26,16 +26,33 @@ jobs:
 
       - name: Setup Xray Proxy
         run: |
+          echo "=== Starting Xray Proxy Setup ==="
           # 下载最新的 Xray
           curl -L -o xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          echo "=== Xray downloaded ==="
           # 解压，自动覆盖已有文件
           unzip -o xray.zip
+          echo "=== Xray unzipped ==="
+          ls -la
+          echo "=== config.json content ==="
+          cat config.json
+          echo "=== Starting Xray ==="
           # 后台启动，并把日志存起来方便报错查看
           ./xray -c config.json > xray_log.txt 2>&1 &
+          XRAY_PID=$!
+          echo "Xray PID: $XRAY_PID"
           # 给一点启动时间
-          sleep 5
+          sleep 10
+          echo "=== After 10 seconds ==="
+          # 检查 Xray 是否还在运行
+          ps aux | grep xray || echo "Xray process not found"
           # 检查 1080 端口是否开了
-          netstat -tuln | grep 1080 || echo "Port check completed"
+          echo "=== Checking ports ==="
+          netstat -tuln || echo "netstat not available"
+          ss -tuln || echo "ss not available"
+          echo "=== Xray log (first 100 lines) ==="
+          cat xray_log.txt || echo "No xray_log.txt found"
+          echo "=== Xray Proxy Setup Complete ==="
 
       - name: Install dependencies
         run: |
