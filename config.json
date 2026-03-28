@@ -1,0 +1,34 @@
+{
+  "inbounds": [{
+    "port": 1080,
+    "listen": "127.0.0.1",
+    "protocol": "http"
+  }],
+  "outbounds": [{
+    "protocol": "vless",
+    "settings": {
+      "vnext": [{
+        "address": "letao.dpdns.org",
+        "port": 443,
+        "users": [{
+          "id": "8a629823-620e-4ce1-ae62-6f2477465f62",
+          "encryption": "none"
+        }]
+      }]
+    },
+    "streamSettings": {
+      "network": "ws",
+      "security": "tls",
+      "tlsSettings": {
+        "serverName": "letao.dpdns.org",
+        "allowInsecure": false
+      },
+      "wsSettings": {
+        "path": "/?ed=2048",
+        "headers": {
+          "Host": "letao.dpdns.org"
+        }
+      }
+    }
+  }]
+}
