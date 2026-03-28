@@ -59,22 +59,79 @@ logger.info("=" * 50)
 
 WATERMARK_PATH = "/tmp/watermark.png"
 
+def find_chinese_font():
+    """查找中文字体"""
+    import sys
+    parent_dir = os.path.dirname(os.path.abspath(__file__))
+    # 1. 先检查项目中的中文字体
+    bundled_font = os.path.join(parent_dir, "src", "hf", "assets", "fonts", "chinese.otf")
+    if os.path.exists(bundled_font):
+        logger.info(f"使用项目中的中文字体: {bundled_font}")
+        return bundled_font
+    
+    # 2. 检查系统字体
+    if sys.platform == "win32":
+        font_dir = r"C:\Windows\Fonts"
+        font_paths = [
+            os.path.join(font_dir, "simhei.ttf"),
+            os.path.join(font_dir, "msyh.ttc"),
+            os.path.join(font_dir, "simsun.ttc"),
+        ]
+        for path in font_paths:
+            if os.path.exists(path):
+                logger.info(f"找到系统中文字体: {path}")
+                return path
+    else:
+        # Linux 系统，查找常见的中文字体
+        font_dirs = [
+            "/usr/share/fonts",
+            "/usr/share/fonts/truetype",
+            "/usr/local/share/fonts",
+        ]
+        for font_dir in font_dirs:
+            if os.path.exists(font_dir):
+                for root, dirs, files in os.walk(font_dir):
+                    for f in files:
+                        if f.endswith(('.ttf', '.TTC', '.TTF', '.otf', '.OTF')):
+                            if any(kw in f.lower() for kw in ['chinese', 'cjk', 'hei', 'song', 'noto', 'zh', 'cn', 'sc']):
+                                path = os.path.join(root, f)
+                                logger.info(f"找到Linux中文字体: {path}")
+                                return path
+    logger.warning("未找到中文字体，使用默认字体")
+    return None
+
 def generate_watermark():
     try:
         from PIL import Image, ImageDraw, ImageFont
-        width, height = 500, 60
+        # 增大水印尺寸
+        width, height = 800, 120
         img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         draw = ImageDraw.Draw(img)
-        font = ImageFont.load_default()
+        
+        # 获取中文字体
+        font_path = find_chinese_font()
+        font_size = 48
+        if font_path:
+            try:
+                font = ImageFont.truetype(font_path, font_size)
+            except:
+                font = ImageFont.load_default()
+        else:
+            font = ImageFont.load_default()
+        
         text = os.getenv("WATERMARK_TEXT", "艺术家防走失频道@ARTDaliy")
+        
+        # 计算文字位置，居中显示
         bbox = draw.textbbox((0, 0), text, font=font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
-        x = 10
+        x = (width - text_width) // 2
         y = (height - text_height) // 2
-        draw.text((x, y), text, font=font, fill=(255, 255, 255, 255))
+        
+        # 白色文字
+        draw.text((x, y), text, font=font, fill=(255, 255, 255, 220))
         img.save(WATERMARK_PATH, "PNG")
-        logger.info(f"水印图片已生成: {WATERMARK_PATH}")
+        logger.info(f"水印图片已生成: {WATERMARK_PATH}, 尺寸: {width}x{height}, 字体大小: {font_size}")
     except Exception as e:
         logger.warning(f"水印生成失败: {e}")
 
