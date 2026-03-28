@@ -237,6 +237,20 @@ async def download_video_real(url: str, output_path: str, target_video_id: str =
                         logger.info(f"已生成假的 msToken: {ms_token[:20]}...")
                 params.msToken = ms_token
                 API.params["msToken"] = ms_token
+                # 把 msToken 也加到 Cookie 字符串里
+                if douyin_cookie:
+                    updated_cookie = douyin_cookie
+                    if "msToken=" in updated_cookie:
+                        # 如果已有 msToken，替换它
+                        import re
+                        updated_cookie = re.sub(r'msToken=[^;]*', f'msToken={ms_token}', updated_cookie)
+                    else:
+                        # 如果没有，追加到末尾
+                        if not updated_cookie.endswith(';'):
+                            updated_cookie += ';'
+                        updated_cookie += f' msToken={ms_token}'
+                    params.cookie_str = updated_cookie
+                    params.headers["Cookie"] = updated_cookie
                 
                 # 提取 uifid（同时尝试 UIFID 和 uifid）
                 uifid = cookie_dict.get("UIFID") or cookie_dict.get("uifid")
