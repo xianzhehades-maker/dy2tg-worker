@@ -1,0 +1,3 @@
+title = "dy2tg Video Processor"
+port = 7860
+app_command = "uvicorn hf_worker:app --host 0.0.0.0 --port 7860"

@@ -1,0 +1,11 @@
+{
+  "bots": {
+    "bot1": {
+      "enabled": true,
+      "api_id": "38038967",
+      "api_hash": "9823a2c01e1d29f91bacc2a630ef3a4b",
+      "bot_token": "8225605217:AAFAdFZuesZZqApCUUmghiBvrG2kwHTLTC0",
+      "chat_id": "@yunyunyuyu"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+name = "dy2tg-bot"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "BOT_DB"
+database_name = "dy2tg_db"
+database_id = "6a65d9af-bcfc-4683-a3ee-8790cdbc0346"
+
+[triggers]
+crons = ["*/1 * * * *"]
+
+# 需要配置以下 secrets（wrangler secret put）:
+# GH_REPO = "owner/repo"         # GitHub 仓库，如 "username/dy2tg-github"
+# GH_PAT = "ghp_xxx"              # GitHub Personal Access Token（需要有 repo 权限）

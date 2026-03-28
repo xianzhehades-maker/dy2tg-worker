@@ -1,0 +1,10 @@
+{
+  "nvidia_nim_url": "http://localhost:8000/v1",
+  "nvidia_api_key": "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",
+  "nvidia_model": "qwen/qwen3.5-397b-a17b",
+  "max_retries": 3,
+  "retry_delay": 2,
+  "whisper_model": "small",
+  "whisper_device": "cpu",
+  "whisper_compute_type": "int8"
+}

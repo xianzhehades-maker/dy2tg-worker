@@ -1,0 +1,33 @@
+name: UP Polling and Video Processing
+
+on:
+  repository_dispatch:
+    types: [poll-and-process]
+
+  workflow_dispatch:
+
+jobs:
+  poll-and-process:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r requirements_hf.txt
+
+      - name: Poll UPs and dispatch new videos
+        env:
+          WORKERS_URL: ${{ secrets.WORKERS_URL }}
+          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          GH_REPO: ${{ github.repository }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          python .github/workflows/poll_up.py

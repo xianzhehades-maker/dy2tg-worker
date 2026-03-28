@@ -1,0 +1,62 @@
+name: Video Processing Dispatch
+
+on:
+  repository_dispatch:
+    types: [video-process]
+
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'Video URL (UP homepage)'
+        required: true
+      task_id:
+        description: 'Video ID (aweme_id)'
+        required: true
+      chat_id:
+        description: 'TG Chat ID'
+        required: false
+      video_desc:
+        description: 'Video description'
+        required: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir -r requirements_hf.txt
+
+      - name: Process Video
+        env:
+          VIDEO_URL: ${{ github.event.client_payload.video_url || inputs.video_url }}
+          TASK_ID: ${{ github.event.client_payload.task_id || inputs.task_id }}
+          CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id }}
+          VIDEO_DESC: ${{ github.event.client_payload.video_desc || inputs.video_desc }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
+          WORKERS_URL: ${{ secrets.WORKERS_URL }}
+          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          GITHUB_ACTIONS: "true"
+        run: |
+          python hf_worker.py
+
+      - name: Notify result
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Video processing completed for task ${{ github.event.client_payload.task_id || inputs.task_id }}"
+          else
+            echo "❌ Video processing failed for task ${{ github.event.client_payload.task_id || inputs.task_id }}"
+          fi

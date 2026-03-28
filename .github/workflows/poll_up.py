@@ -1,0 +1,292 @@
+"""
+UP Polling Script - GitHub Actions
+从 CF Worker 获取监控UP列表，轮询新视频，触发处理流水线
+"""
+
+import os
+import sys
+import asyncio
+import logging
+import httpx
+from pathlib import Path
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+WORKERS_URL = os.getenv("WORKERS_URL", "").rstrip("/")
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
+GH_REPO = os.getenv("GH_REPO", "")
+GH_PAT = os.getenv("GH_PAT", "")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+DOUYIN_COOKIE = os.getenv("DOUYIN_COOKIE", "")
+
+# 把 tiktok_downloader 目录加到 sys.path 里，这样可以直接导入 src
+TIKTOK_DOWNLOADER_DIR = str(Path(__file__).resolve().parent.parent.parent / "tiktok_downloader")
+sys.path.insert(0, TIKTOK_DOWNLOADER_DIR)
+logger.info(f"TikTokDownloader 目录: {TIKTOK_DOWNLOADER_DIR}")
+logger.info(f"当前工作目录: {os.getcwd()}")
+
+
+async def get_monitors():
+    if not WORKERS_URL:
+        logger.error("WORKERS_URL 未配置")
+        return [], []
+
+    url = f"{WORKERS_URL}/api/monitors"
+    headers = {}
+    if AUTH_TOKEN:
+        headers["X-Auth-Token"] = AUTH_TOKEN
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(url, headers=headers)
+        logger.info(f"Monitors 响应: {resp.status_code}")
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("monitors", []), data.get("groups", [])
+
+
+async def get_task_history():
+    if not WORKERS_URL:
+        return []
+
+    url = f"{WORKERS_URL}/api/task_history"
+    headers = {}
+    if AUTH_TOKEN:
+        headers["X-Auth-Token"] = AUTH_TOKEN
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        return [t.get("video_id") or t.get("task_id") for t in data.get("tasks", [])]
+
+
+async def dispatch_video_process(video_url: str, task_id: str, chat_id: int, video_desc: str):
+    if not GH_REPO or not GH_PAT:
+        logger.error("GH_REPO 或 GH_PAT 未配置")
+        return False
+
+    owner, repo = GH_REPO.split("/")
+    url = f"https://api.github.com/repos/{owner}/{repo}/dispatches"
+
+    headers = {
+        "Authorization": f"Bearer {GH_PAT}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Content-Type": "application/json",
+        "User-Agent": "dy2tg-bot",
+    }
+
+    payload = {
+        "event_type": "video-process",
+        "client_payload": {
+            "video_url": video_url,
+            "task_id": task_id,
+            "chat_id": chat_id,
+            "video_desc": video_desc,
+        },
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(url, headers=headers, json=payload)
+        if resp.status_code in (200, 204):
+            logger.info(f"✅ 已触发视频处理: {task_id}")
+            return True
+        else:
+            logger.error(f"触发失败: {resp.status_code} {resp.text}")
+            return False
+
+
+def extract_sec_user_id(url: str) -> str:
+    import re
+    match = re.search(r'/user/([A-Za-z0-9_-]+)', url)
+    if match:
+        return match.group(1)
+    return None
+
+
+async def fetch_user_videos(sec_user_id: str):
+    """获取UP主页视频列表 - 使用 TikTokDownloader 项目（抖音版）"""
+    try:
+        from src.testers.params import Params
+        from src.interface.account import Account  # 注意：这里用 Account（抖音的），不是 AccountTikTok（TikTok 的）
+        from src.interface import API
+        from src.extract.extractor import Extractor
+        from src.tools.format import cookie_str_to_dict
+        from src.encrypt.msToken import MsToken
+        
+        # 创建一个 dummy recorder 类，只需要有 save 方法和 field_keys 属性
+        class DummyRecorder:
+            def __init__(self):
+                self.field_keys = []
+            async def save(self, *args, **kwargs):
+                pass
+        
+        API.init_progress_object(server_mode=True)
+        
+        async with Params() as params:
+            # 设置 cookie
+            if DOUYIN_COOKIE:
+                params.cookie_str = DOUYIN_COOKIE
+                params.headers["Cookie"] = DOUYIN_COOKIE
+                
+                # 从 cookie 字符串中提取 msToken 和 uifid（同时尝试大小写）
+                cookie_dict = cookie_str_to_dict(DOUYIN_COOKIE)
+                
+                # 提取 msToken（同时尝试大小写，如果没有就生成假的）
+                ms_token = cookie_dict.get("msToken") or cookie_dict.get("mstoken") or cookie_dict.get("MSTOKEN")
+                if not ms_token:
+                    # 如果 cookie 里没有 msToken，就生成一个假的
+                    fake_ms_token = MsToken.get_fake_ms_token()
+                    ms_token = fake_ms_token["msToken"]
+                    logger.info(f"从 cookie 中未找到 msToken，已生成假的 msToken: {ms_token[:20]}...")
+                params.msToken = ms_token
+                API.params["msToken"] = ms_token
+                
+                # 提取 uifid（同时尝试 UIFID 和 uifid）
+                uifid = cookie_dict.get("UIFID") or cookie_dict.get("uifid")
+                if uifid:
+                    params.uifid = uifid
+                    API.params["uifid"] = uifid
+            
+            # 使用 Account（抖音的），不是 AccountTikTok
+            account = Account(
+                params,
+                cookie=DOUYIN_COOKIE,
+                proxy=None,
+                sec_user_id=sec_user_id,
+                tab="post",
+                cursor=0,
+                count=20
+            )
+            
+            raw_videos = await account.run(single_page=True)
+            logger.info(f"从 Account（抖音）获取到 {len(raw_videos)} 个原始视频")
+            
+            if not raw_videos:
+                return []
+            
+            # 使用 Extractor 转换数据，添加 downloads 字段（特殊下载链接）
+            extractor = Extractor(params)
+            # 创建一个空的记录器，只用来提取数据
+            dummy_recorder = DummyRecorder()
+            formatted_videos = await extractor.run(raw_videos, dummy_recorder, type_="detail", tiktok=False)
+            
+            logger.info(f"从 Extractor 转换后得到 {len(formatted_videos)} 个视频，包含 downloads 字段")
+            
+            # 转换为我们需要的格式
+            result_videos = []
+            for video in formatted_videos:
+                try:
+                    video_id = video.get("id", "")
+                    desc = video.get("desc", "")
+                    
+                    if video_id:
+                        result_videos.append({
+                            "video_id": video_id,
+                            "desc": desc,
+                            "raw_video": video,  # 包含 downloads 字段
+                            "downloads": video.get("downloads", [])  # 特殊下载链接
+                        })
+                except Exception as e:
+                    logger.warning(f"处理视频数据时出错: {e}")
+                    continue
+            
+            return result_videos
+    except Exception as e:
+        logger.error(f"获取UP视频失败 {sec_user_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+async def notify_telegram(text: str):
+    if not BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    for chat_id in [os.getenv("NOTIFY_CHAT_ID", "0")]:
+        if str(chat_id) == "0":
+            continue
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(url, json={"chat_id": chat_id, "text": text})
+
+
+async def poll_single_up(monitor, processed_ids: set):
+    sec_user_id = extract_sec_user_id(monitor.get("up_url", ""))
+    if not sec_user_id:
+        logger.warning(f"无法提取 sec_user_id: {monitor['up_url']}")
+        return 0
+
+    videos = await fetch_user_videos(sec_user_id)
+    if not videos:
+        logger.info(f"UP {monitor['up_name']} 无新视频")
+        return 0
+
+    dispatched = 0
+    group_id = monitor.get("group_id")
+    for video in videos:
+        video_id = str(video.get("video_id", ""))
+        if video_id in processed_ids:
+            continue
+
+        chat_id = monitor.get("target_chat_id") or 0
+        desc = video.get("desc", "")[:100]
+
+        success = await dispatch_video_process(
+            video_url=monitor.get("up_url"),
+            task_id=video_id,
+            chat_id=chat_id,
+            video_desc=desc
+        )
+        if success:
+            dispatched += 1
+            processed_ids.add(video_id)
+
+    return dispatched
+
+
+async def main():
+    logger.info("=" * 50)
+    logger.info("UP Polling 开始 (使用 TikTokDownloader)...")
+    logger.info(f"WORKERS_URL: {WORKERS_URL}")
+    logger.info("=" * 50)
+
+    monitors, groups = await get_monitors()
+    if not monitors:
+        logger.warning("没有监控的UP")
+        await notify_telegram("⚠️ /run_now: 没有监控的UP")
+        return
+
+    group_map = {g["id"]: g for g in groups}
+
+    monitor_list = []
+    for m in monitors:
+        g = group_map.get(m.get("group_id"), {})
+        target_chat = g.get("target_channels", "")
+        if target_chat:
+            try:
+                tc = int(target_chat.split(",")[0].strip())
+            except:
+                tc = 0
+        else:
+            tc = 0
+        m["target_chat_id"] = tc
+        monitor_list.append(m)
+
+    task_history_ids = await get_task_history()
+    processed_ids = set(task_history_ids)
+    logger.info(f"已处理视频数: {len(processed_ids)}")
+
+    total_dispatched = 0
+    for m in monitor_list:
+        d = await poll_single_up(m, processed_ids)
+        total_dispatched += d
+
+    logger.info(f"轮询完成，新视频: {total_dispatched}")
+
+    if total_dispatched > 0:
+        await notify_telegram(f"✅ /run_now: 发现 {total_dispatched} 个新视频，已触发处理")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

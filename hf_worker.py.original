@@ -1,0 +1,703 @@
+"""
+Hugging Face 计算层 - FastAPI 服务
+负责接收任务、处理视频、上传到 R2、回调通知
+
+使用方式:
+  uvicorn hf_worker:app --host 0.0.0.0 --port 7860
+"""
+
+import os
+import sys
+import asyncio
+import logging
+import uuid
+import hashlib
+import time
+from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Header, Depends
+from pydantic import BaseModel
+import httpx
+
+# R2 相关
+try:
+    import boto3
+    from botocore.config import Config
+    R2_AVAILABLE = True
+except ImportError:
+    R2_AVAILABLE = False
+    logging.warning("boto3 未安装，R2 上传功能不可用")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+logger.info("=" * 50)
+logger.info("HF Worker 启动中...")
+logger.info(f"Python: {sys.version}")
+logger.info(f"工作目录: {os.getcwd()}")
+logger.info("=" * 50)
+
+app = FastAPI(title="dy2tg Video Processor")
+
+OUTPUT_DIR = Path("/tmp/exports")
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+# R2 配置
+R2_CONFIG = {
+    "endpoint_url": os.getenv("R2_ENDPOINT_URL", ""),
+    "aws_access_key_id": os.getenv("R2_ACCESS_KEY_ID", ""),
+    "aws_secret_access_key": os.getenv("R2_SECRET_ACCESS_KEY", ""),
+}
+R2_BUCKET = os.getenv("R2_BUCKET_NAME", "video-assets")
+R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "")  # 例如: https://pub-xxx.r2.dev
+
+CALLBACK_URL = os.getenv("CALLBACK_URL", "")
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "") or os.getenv("HF_AUTH_TOKEN", "")
+
+if not CALLBACK_URL:
+    logger.warning("未设置 CALLBACK_URL 环境变量，回调将无法发送")
+
+if not AUTH_TOKEN:
+    logger.warning("未设置 AUTH_TOKEN 环境变量，安全校验将被跳过（不推荐）")
+
+if not all(R2_CONFIG.values()):
+    logger.warning("R2 配置不完整，上传功能可能不可用")
+
+
+class TaskRequest(BaseModel):
+    video_url: str
+    chat_id: int
+    task_id: str
+    caption: Optional[str] = None
+    watermark_text: Optional[str] = None
+    generate_ai_caption: bool = False
+
+
+class TaskResponse(BaseModel):
+    status: str
+    task_id: str
+    message: str
+
+
+async def verify_token(x_auth_token: str = Header(None)):
+    """验证认证令牌"""
+    if not AUTH_TOKEN:
+        return True
+    if x_auth_token != AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="无效的认证令牌")
+    return True
+
+
+async def download_video(url: str, output_path: str) -> bool:
+    """使用 TikTokDownloader 的 ABogus 签名下载抖音视频"""
+    try:
+        import re
+        import httpx
+        import asyncio
+        
+        # 从 URL 中提取视频 ID
+        video_id_match = re.search(r'/video/(\d+)', url)
+        if not video_id_match:
+            logger.error(f"无法从 URL 提取视频 ID: {url}")
+            return False
+        
+        video_id = video_id_match.group(1)
+        logger.info(f"视频 ID: {video_id}")
+        
+        # 添加 src 目录到 Python 路径
+        app_dir = "/app"
+        src_dir = os.path.join(app_dir, "src")
+        if not os.path.exists(src_dir):
+            src_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+        
+        import sys
+        # 需要同时添加两个路径：
+        # 1. src_dir（/app/src）用于 "from src.xxx" 导入
+        sys.path.insert(0, str(src_dir))
+        
+        logger.info(f"src_dir: {src_dir}, app_dir: {app_dir}")
+        logger.info(f"src_dir 目录内容: {os.listdir(src_dir) if os.path.exists(src_dir) else '不存在'}")
+        
+        # 导入 TikTokDownloader 的 API 客户端
+        from hf.adapter.douyin_api_client import DouyinAPIClient
+        from hf.config import get_config
+        
+        # 获取配置中的 cookies
+        config = get_config()
+        # 支持 DOUYIN_COOKIE（单数）和 DOUYIN_COOKIES（复数）
+        douyin_cookies = config.get('douyin_cookies') or os.getenv('DOUYIN_COOKIES', '') or os.getenv('DOUYIN_COOKIE', '')
+        
+        logger.info(f"使用 DouyinAPIClient 获取视频信息...")
+        logger.info(f"是否使用 Cookie: {bool(douyin_cookies)}")
+        
+        client = DouyinAPIClient(cookie=douyin_cookies if douyin_cookies else None)
+        
+        # 获取视频详情
+        video_info = await client.fetch_video_detail(video_id)
+        
+        if not video_info:
+            logger.error("无法获取视频详情")
+            return False
+        
+        logger.info(f"获取到视频信息: {video_info.get('desc', '')[:50]}...")
+        
+        # 获取下载链接
+        download_url = video_info.get("download_url")
+        if not download_url:
+            logger.error("无法获取视频下载链接")
+            return False
+        
+        logger.info(f"获取到视频下载链接，开始下载...")
+        
+        # 下载视频
+        async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as http_client:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                "Referer": "https://www.douyin.com/",
+            }
+            resp = await http_client.get(download_url, headers=headers)
+            resp.raise_for_status()
+            
+            with open(output_path, "wb") as f:
+                f.write(resp.content)
+        
+        file_size = os.path.getsize(output_path)
+        logger.info(f"视频下载完成: {output_path}, 大小: {file_size} bytes")
+        
+        if file_size < 10000:
+            logger.error(f"下载的文件太小，可能是无效内容: {file_size} bytes")
+            return False
+        
+        return True
+            
+    except Exception as e:
+        logger.error(f"视频下载失败: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
+async def process_with_ffmpeg(
+    input_path: str,
+    output_path: str,
+    watermark_text: Optional[str] = None,
+    watermark_image: Optional[str] = None,
+    add_faststart: bool = True
+) -> bool:
+    """使用 FFmpeg 处理视频（缩放1%、微比特率、擦除元数据、水印、FastStart优化）"""
+    try:
+        logger.info(f"开始处理视频: {input_path}")
+
+        # 最终输出路径
+        temp_path = output_path.replace(".mp4", "_temp.mp4")
+
+        # 构建视频滤镜链
+        filter_complex_parts = []
+        input_count = 1
+        
+        # 第一个输入是视频
+        filter_parts = ["[0:v]"]
+        
+        # 1. 缩放 1%
+        filter_parts.append("scale=iw*0.99:ih*0.99")
+        filter_parts.append("[v_scaled]")
+        filter_complex_parts.append("".join(filter_parts))
+        
+        current_input = "[v_scaled]"
+        
+        # 2. 添加图片水印（如果有水印图片）
+        if watermark_image and os.path.exists(watermark_image):
+            input_count = 2
+            # 水印图片放在右下角
+            filter_complex_parts.append(
+                f"{current_input}[1:v]overlay=main_w-overlay_w-10:main_h-overlay_h-10[v_watermarked]"
+            )
+            current_input = "[v_watermarked]"
+        
+        # 3. 添加文字水印（如果有水印文本且没有图片水印）
+        elif watermark_text:
+            filter_parts = [f"{current_input}"]
+            filter_parts.append(f"drawtext=text='{watermark_text}':x=10:y=10:fontcolor=white:fontsize=24")
+            filter_parts.append("[v_watermarked]")
+            filter_complex_parts.append("".join(filter_parts))
+            current_input = "[v_watermarked]"
+        
+        # 构建完整的 filter_complex
+        filter_complex = ";".join(filter_complex_parts) if filter_complex_parts else None
+        
+        # FFmpeg 命令
+        cmd = ["ffmpeg", "-i", input_path]
+        
+        # 添加水印图片作为第二个输入
+        if watermark_image and os.path.exists(watermark_image):
+            cmd.extend(["-i", watermark_image])
+        
+        # 添加滤镜
+        if filter_complex:
+            cmd.extend(["-filter_complex", filter_complex])
+            cmd.extend(["-map", current_input])
+        cmd.extend(["-map", "0:a?"])
+        
+        # 添加编码参数
+        cmd.extend([
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            "-map_metadata", "-1",
+            "-movflags", "+faststart",
+            temp_path, "-y"
+        ])
+
+        logger.info(f"执行 FFmpeg 命令: {' '.join(cmd)}")
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            logger.error(f"FFmpeg 处理失败: {stderr.decode()}")
+            return False
+
+        # 直接使用处理好的文件
+        import shutil
+        shutil.move(temp_path, output_path)
+
+        logger.info(f"视频处理完成: {output_path}")
+        return True
+
+    except Exception as e:
+        logger.error(f"视频处理异常: {e}")
+        return False
+
+
+def upload_to_r2(file_path: str, object_name: str) -> Optional[str]:
+    """上传文件到 R2 并返回公开访问 URL"""
+    if not R2_AVAILABLE:
+        logger.error("R2 不可用 (boto3 未安装)")
+        return None
+
+    if not all(R2_CONFIG.values()):
+        logger.error("R2 配置不完整")
+        return None
+
+    try:
+        logger.info(f"开始上传到 R2: {object_name}")
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=R2_CONFIG["endpoint_url"],
+            aws_access_key_id=R2_CONFIG["aws_access_key_id"],
+            aws_secret_access_key=R2_CONFIG["aws_secret_access_key"],
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+
+        s3.upload_file(file_path, R2_BUCKET, object_name)
+
+        # 生成公开 URL
+        if R2_PUBLIC_URL:
+            download_url = f"{R2_PUBLIC_URL.rstrip('/')}/{object_name}"
+        else:
+            download_url = f"{R2_CONFIG['endpoint_url']}/{R2_BUCKET}/{object_name}"
+
+        logger.info(f"上传成功: {download_url}")
+        return download_url
+
+    except Exception as e:
+        logger.error(f"R2 上传失败: {e}")
+        return None
+
+
+async def notify_callback(task_id: str, chat_id: int, download_url: Optional[str], caption: Optional[str], success: bool):
+    """通知中转层处理结果"""
+    logger.info(f"DEBUG: CALLBACK_URL = {CALLBACK_URL}")
+    logger.info(f"DEBUG: AUTH_TOKEN configured = {bool(AUTH_TOKEN)}")
+    if not CALLBACK_URL:
+        logger.warning("未配置回调地址，跳过通知")
+        return
+
+    try:
+        payload = {
+            "task_id": task_id,
+            "chat_id": chat_id,
+            "download_url": download_url,
+            "caption": caption,
+            "success": success,
+            "error": None if success else "处理失败"
+        }
+
+        headers = {}
+        if AUTH_TOKEN:
+            headers["X-Auth-Token"] = AUTH_TOKEN
+
+        logger.info(f"DEBUG: 发送回调到 {CALLBACK_URL}")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                CALLBACK_URL,
+                json=payload,
+                headers=headers
+            )
+            resp.raise_for_status()
+            logger.info(f"回调通知成功: {resp.status_code}")
+
+    except Exception as e:
+        logger.error(f"回调通知失败: {e}")
+
+
+async def process_video_task(
+    task_id: str,
+    video_url: str,
+    chat_id: int,
+    caption: Optional[str] = None,
+    watermark_text: Optional[str] = None,
+    generate_ai_caption: bool = False
+):
+    """后台处理视频任务"""
+    input_path = f"/tmp/{task_id}_in.mp4"
+    output_path = f"/tmp/exports/{task_id}_out.mp4"
+    watermark_path = "/app/watermark.png"
+
+    # 确保输出目录存在
+    os.makedirs("/tmp/exports", exist_ok=True)
+
+    try:
+        success = False
+        download_url = None
+        final_caption = caption
+
+        # 1. 下载视频
+        if not await download_video(video_url, input_path):
+            await notify_callback(task_id, chat_id, None, None, False)
+            return
+
+        # 2. AI 文案生成 (如果需要)
+        if generate_ai_caption and not caption:
+            try:
+                from core.ai_caption.generator import AICaptionGenerator
+                ai_gen = AICaptionGenerator()
+                final_caption = await ai_gen.generate_caption(
+                    video_path=input_path,
+                    original_desc=caption or "视频",
+                    style="default",
+                    length=200,
+                    language="chinese"
+                )
+                logger.info(f"AI 文案生成成功: {final_caption[:50]}...")
+            except Exception as e:
+                logger.warning(f"AI 文案生成失败: {e}")
+                final_caption = caption
+
+        # 3. 处理视频 (水印 + FastStart)
+        watermark_image = watermark_path if os.path.exists(watermark_path) else None
+        if not await process_with_ffmpeg(input_path, output_path, watermark_text, watermark_image):
+            await notify_callback(task_id, chat_id, None, final_caption, False)
+            return
+
+        # 4. 上传到 R2
+        download_url = upload_to_r2(output_path, f"{task_id}_out.mp4")
+
+        if not download_url:
+            logger.error("R2 上传失败，回退到本地文件")
+            # 回退：使用 HF Space 的本地文件 URL
+            base_url = os.getenv("HF_SPACE_URL", "").rstrip("/")
+            if base_url:
+                download_url = f"{base_url}/outputs/{task_id}_out.mp4"
+
+        success = True
+
+        # 5. 回调通知 (包含 caption)
+        await notify_callback(task_id, chat_id, download_url, final_caption, success)
+
+    except Exception as e:
+        logger.error(f"任务处理异常: {e}")
+        await notify_callback(task_id, chat_id, None, caption, False)
+
+    finally:
+        # 6. 清理临时文件 (释放 HF 磁盘空间)
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        if os.path.exists(output_path):
+            os.remove(output_path)
+
+
+@app.get("/")
+async def root():
+    """健康检查"""
+    return {
+        "status": "running",
+        "service": "dy2tg-video-processor",
+        "outputs_count": len(list(OUTPUT_DIR.glob("*.mp4")))
+    }
+
+
+@app.post("/callback")
+async def callback_endpoint(
+    task_id: str = None,
+    chat_id: int = None,
+    download_url: str = None,
+    caption: str = None,
+    success: bool = None,
+):
+    """
+    接收处理结果回调（Cloudflare Workers 调用此端点发送处理结果）
+
+    查询参数:
+    - task_id: 任务ID
+    - chat_id: 聊天ID
+    - download_url: 下载URL（成功时）
+    - caption: 视频标题
+    - success: 是否成功
+    """
+    logger.info(f"收到回调: task_id={task_id}, success={success}")
+    # 回调处理逻辑（目前只是记录日志）
+    return {"status": "ok"}
+
+
+@app.get("/wake")
+async def wake_up():
+    """唤醒 HF Space（免费版会休眠）"""
+    logger.info("收到唤醒请求")
+    return {"status": "awake", "timestamp": time.time()}
+
+
+@app.post("/enqueue")
+async def enqueue_task(
+    task: TaskRequest,
+    background_tasks: BackgroundTasks,
+    _: bool = Depends(verify_token)
+):
+    """
+    接收处理任务
+
+    请求体:
+    {
+        "video_url": "https://...",
+        "chat_id": 123456,
+        "task_id": "uuid",
+        "caption": "可选标题",
+        "watermark_text": "可选水印",
+        "generate_ai_caption": true
+    }
+    """
+    if not task.video_url:
+        raise HTTPException(status_code=400, detail="video_url 不能为空")
+
+    if not CALLBACK_URL:
+        raise HTTPException(status_code=500, detail="服务端未配置回调地址")
+
+    logger.info(f"收到任务: {task.task_id}, video_url: {task.video_url}")
+
+    # 添加后台任务
+    background_tasks.add_task(
+        process_video_task,
+        task.task_id,
+        task.video_url,
+        task.chat_id,
+        task.caption,
+        task.watermark_text,
+        task.generate_ai_caption
+    )
+
+    return TaskResponse(
+        status="processing",
+        task_id=task.task_id,
+        message="任务已加入处理队列"
+    )
+
+
+@app.get("/status/{task_id}")
+async def get_task_status(task_id: str, _: bool = Depends(verify_token)):
+    """查询任务状态"""
+    output_file = OUTPUT_DIR / f"{task_id}_out.mp4"
+
+    if output_file.exists():
+        return {
+            "task_id": task_id,
+            "status": "completed",
+            "download_url": f"/outputs/{task_id}_out.mp4"
+        }
+
+    return {
+        "task_id": task_id,
+        "status": "processing"
+    }
+
+
+@app.delete("/cleanup")
+async def cleanup_old_files(days: int = 7, _: bool = Depends(verify_token)):
+    """清理旧的处理文件"""
+    import time
+    cutoff = time.time() - (days * 86400)
+    removed = 0
+
+    for file in OUTPUT_DIR.glob("*.mp4"):
+        if file.stat().st_mtime < cutoff:
+            file.unlink()
+            removed += 1
+
+    return {"removed": removed, "days": days}
+
+
+WORKERS_URL = os.getenv("WORKERS_URL", "").rstrip("/")
+MONITOR_CHECK_INTERVAL = int(os.getenv("MONITOR_CHECK_INTERVAL", "3600"))
+LAST_CHECKED_VIDEOS = {}
+
+if not WORKERS_URL:
+    logger.warning("未设置 WORKERS_URL 环境变量，监控功能将不可用")
+
+
+async def get_monitors():
+    """从 Workers 获取监控列表"""
+    if not WORKERS_URL:
+        return []
+
+    try:
+        headers = {}
+        if AUTH_TOKEN:
+            headers["X-Auth-Token"] = AUTH_TOKEN
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"{WORKERS_URL}/api/monitors", headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("success"):
+                return data.get("monitors", [])
+            return []
+    except Exception as e:
+        logger.error(f"获取监控列表失败: {e}")
+        return []
+
+
+async def add_task_to_workers(video_id: str, video_url: str, group_id: int, caption: str = None):
+    """添加任务到 Workers"""
+    if not WORKERS_URL:
+        return False
+
+    try:
+        headers = {}
+        if AUTH_TOKEN:
+            headers["X-Auth-Token"] = AUTH_TOKEN
+
+        payload = {
+            "video_id": video_id,
+            "video_url": video_url,
+            "group_id": group_id,
+            "caption": caption
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{WORKERS_URL}/api/add_task", json=payload, headers=headers)
+            data = resp.json()
+            if data.get("success"):
+                logger.info(f"任务添加成功: {video_id}")
+                return True
+            else:
+                logger.warning(f"任务添加失败: {data.get('error')}")
+                return False
+    except Exception as e:
+        logger.error(f"添加任务失败: {e}")
+        return False
+
+
+async def check_up_videos():
+    """检查 UP 主的新视频"""
+    try:
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        
+        from core.api.douyin_client import DouyinAPIClient
+    except Exception as e:
+        logger.error(f"无法导入 DouyinAPIClient，监控功能不可用: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return
+
+    monitors = await get_monitors()
+    if not monitors:
+        logger.info("没有活动的监控")
+        return
+
+    logger.info(f"开始检查 {len(monitors)} 个 UP 主...")
+    client = DouyinAPIClient()
+
+    for monitor in monitors:
+        try:
+            up_url = monitor.get("up_url", "")
+            group_id = monitor.get("group_id")
+            up_name = monitor.get("up_name", "")
+
+            if not up_url or not group_id:
+                continue
+
+            sec_user_id = client.extract_sec_user_id(up_url)
+            if not sec_user_id:
+                logger.warning(f"无法从 URL 提取 sec_user_id: {up_url}")
+                continue
+
+            logger.info(f"检查 UP 主: {up_name}")
+            videos = await client.fetch_user_videos(sec_user_id, count=5)
+
+            if not videos:
+                continue
+
+            monitor_key = f"{group_id}_{up_name}"
+            last_checked = LAST_CHECKED_VIDEOS.get(monitor_key, 0)
+
+            for video in videos:
+                video_id = video.get("aweme_id")
+                create_time = video.get("create_time", 0)
+
+                if not video_id:
+                    continue
+
+                if create_time > last_checked:
+                    video_url = f"https://www.douyin.com/video/{video_id}"
+                    caption = video.get("title", "")
+                    logger.info(f"发现新视频: {video_id} - {caption[:50]}...")
+
+                    success = await add_task_to_workers(video_id, video_url, group_id, caption)
+                    if success:
+                        if create_time > last_checked:
+                            LAST_CHECKED_VIDEOS[monitor_key] = create_time
+
+                    await asyncio.sleep(2)
+
+        except Exception as e:
+            logger.error(f"处理 UP 主 {monitor.get('up_name', 'unknown')} 失败: {e}")
+
+    logger.info("UP 主检查完成")
+
+
+async def monitor_loop():
+    """监控循环"""
+    logger.info(f"监控循环已启动，检查间隔: {MONITOR_CHECK_INTERVAL} 秒")
+
+    while True:
+        try:
+            await check_up_videos()
+        except Exception as e:
+            logger.error(f"监控循环异常: {e}")
+
+        await asyncio.sleep(MONITOR_CHECK_INTERVAL)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时启动监控循环"""
+    logger.info("执行 startup_event...")
+    if WORKERS_URL:
+        logger.info("监控功能暂时禁用，先确保视频处理正常")
+        # asyncio.create_task(monitor_loop())
+        # logger.info("监控循环已启动")
+    else:
+        logger.warning("未设置 WORKERS_URL，监控循环未启动")
+    logger.info("startup_event 完成")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
