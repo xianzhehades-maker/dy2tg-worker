@@ -186,7 +186,7 @@ async def fetch_user_videos(sec_user_id: str):
             # 使用 Account（抖音的），不是 AccountTikTok
             account = Account(
                 params,
-                cookie=DOUYIN_COOKIE,
+                cookie=updated_cookie,
                 proxy=None,
                 sec_user_id=sec_user_id,
                 tab="post",

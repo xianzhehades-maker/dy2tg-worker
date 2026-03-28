@@ -261,7 +261,7 @@ async def download_video_real(url: str, output_path: str, target_video_id: str =
             # 使用 Account（抖音的），不是 AccountTikTok
             account = Account(
                 params,
-                cookie=douyin_cookie,
+                cookie=updated_cookie,
                 proxy=None,
                 sec_user_id=sec_user_id,
                 tab="post",
