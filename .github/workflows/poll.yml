@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: poll-and-process
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   poll-and-process:
