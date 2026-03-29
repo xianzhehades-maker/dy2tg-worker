@@ -21,6 +21,9 @@ on:
       caption_style:
         description: 'Caption style (default, humor, none)'
         required: false
+      group_id:
+        description: 'Group ID for target channels'
+        required: false
 
 jobs:
   process:
@@ -92,6 +95,7 @@ jobs:
           CHAT_ID: ${{ github.event.client_payload.chat_id || inputs.chat_id }}
           VIDEO_DESC: ${{ github.event.client_payload.video_desc || inputs.video_desc }}
           CAPTION_STYLE: ${{ github.event.client_payload.caption_style || inputs.caption_style || 'default' }}
+          GROUP_ID: ${{ github.event.client_payload.group_id || inputs.group_id }}
           GENERATE_AI_CAPTION: "true"
           R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -101,6 +105,7 @@ jobs:
           WORKERS_URL: ${{ secrets.WORKERS_URL }}
           DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          WATERMARK_TEXT: ${{ secrets.WATERMARK_TEXT }}
           PROXY_URL: http://127.0.0.1:1080
           GITHUB_ACTIONS: "true"
         run: |

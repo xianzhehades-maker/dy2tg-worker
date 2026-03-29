@@ -621,14 +621,29 @@ async def generate_ai_caption_sync(text: str, style: Optional[str] = None) -> Op
         return None
 
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    is_short = style in ("humor", "short", "乐子")
-
-    if is_short:
+    
+    # 根据风格设置不同的提示词和字数限制
+    if style == "sexy":
+        system_prompt = "你是一个性感撩人的博主。请根据内容写一个20字左右的暧昧、性感、吸引人的文案。直接输出文案，不要解释。"
+        max_tokens = 50
+        max_length = 25
+    elif style == "news":
+        system_prompt = "你是一个新闻评论员。请根据内容写一个150字左右的文案。要求：语言犀利、大胆，吸引眼球。直接总结输出文案本身，不要解释。"
+        max_tokens = 200
+        max_length = 160
+    elif style == "humor":
+        system_prompt = "你是一个搞笑博主。请根据内容写一个100字左右的文案。要求：幽默、搞笑、吸引人。直接输出文案本身，不要解释。"
+        max_tokens = 150
+        max_length = 110
+    elif style in ("short", "乐子"):
         system_prompt = "你是一个Telegram段子手。请根据内容写一个20字以内的简短、幽默、吸引人的文案。直接输出文案，不要解释。"
         max_tokens = 50
+        max_length = 25
     else:
+        # 默认风格
         system_prompt = "你是一个电报(Telegram)爆款博主。请根据口播内容写一个70字左右的文案。要求：语言犀利、大胆，吸引眼球。直接总结输出文案本身，不要解释。"
         max_tokens = 150
+        max_length = 75
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -655,8 +670,8 @@ async def generate_ai_caption_sync(text: str, style: Optional[str] = None) -> Op
             result = response.json()
             caption = result["choices"][0]["message"]["content"].strip()
             caption = caption.replace("\n", "").replace('"', "'").replace("'", "'")
-            if len(caption) > 75:
-                caption = caption[:72] + "..."
+            if len(caption) > max_length:
+                caption = caption[:max_length - 3] + "..."
             return caption
         else:
             logger.error(f"Groq API 错误: {response.status_code} {response.text[:200]}")
