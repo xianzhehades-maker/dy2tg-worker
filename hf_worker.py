@@ -752,6 +752,8 @@ async def process_video_cli():
     caption_style = os.getenv("CAPTION_STYLE", "")
     group_id = os.getenv("GROUP_ID")
 
+    logger.info(f"process_video_cli 环境变量: GROUP_ID={group_id}, VIDEO_URL={video_url}, TASK_ID={task_id}")
+
     if not video_url or not task_id:
         logger.error("缺少 VIDEO_URL 或 TASK_ID 环境变量")
         return False
