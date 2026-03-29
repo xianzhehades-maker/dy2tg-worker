@@ -7,6 +7,10 @@ binding = "BOT_DB"
 database_name = "dy2tg_db"
 database_id = "6a65d9af-bcfc-4683-a3ee-8790cdbc0346"
 
+[[r2_buckets]]
+binding = "VIDEO_BUCKET"
+bucket_name = "video-assets"
+
 [triggers]
 crons = ["*/1 * * * *"]
 
