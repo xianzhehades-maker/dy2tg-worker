@@ -1460,11 +1460,16 @@ export default {
 
         const { task_id, chat_id, download_url, caption, success, error } = data;
 
-        const task = await env.BOT_DB.prepare(
-          'SELECT group_id FROM task_history WHERE source_url LIKE ? OR video_id = ?'
+        const existingTask = await env.BOT_DB.prepare(
+          'SELECT group_id, status FROM task_history WHERE source_url LIKE ? OR video_id = ?'
         ).bind(`%${task_id}%`, task_id).first();
 
-        const groupId = task ? task.group_id : null;
+        if (existingTask && (existingTask.status === 'completed' || existingTask.status === 'sent' || existingTask.status === 'send_failed')) {
+          console.log('任务已完成或已发送，跳过重复回调:', task_id, '状态:', existingTask.status);
+          return new Response('Already processed', { status: 200 });
+        }
+
+        const groupId = existingTask ? existingTask.group_id : null;
 
         if (success && download_url) {
           try {

@@ -290,6 +290,10 @@ async def poll_single_up(monitor, processed_ids: set):
         chat_id = monitor.get("target_chat_id") or 0
         desc = video.get("desc", "")[:100]
 
+        if video_id in processed_ids:
+            logger.info(f"视频 {video_id} 已处理过，跳过")
+            continue
+
         await create_task_history(
             video_id=video_id,
             source_url=monitor.get("up_url"),
@@ -304,10 +308,12 @@ async def poll_single_up(monitor, processed_ids: set):
             video_desc=desc,
             group_id=group_id
         )
+
+        processed_ids.add(video_id)
+
         if success:
             dispatched += 1
             processed_count += 1
-            processed_ids.add(video_id)
 
     return dispatched
 
