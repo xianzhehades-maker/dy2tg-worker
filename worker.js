@@ -470,6 +470,11 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
       await env.BOT_DB.prepare(
         'UPDATE monitor_groups SET ai_caption_style = ? WHERE id = ?'
       ).bind(finalStyle, groupId).run();
+      if (finalStyle === 'none') {
+        await env.BOT_DB.prepare(
+          'UPDATE monitor_groups SET ai_caption_length = 0 WHERE id = ?'
+        ).bind(groupId).run();
+      }
       await sendToTelegram(env.BOT_TOKEN, chatId, `✅ 文案风格已设置\n\n分组: ${groupId}\n风格: ${finalStyle}`);
     } catch (e) {
       await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 设置文案风格失败: ${e.message}`);
