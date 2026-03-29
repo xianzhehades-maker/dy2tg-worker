@@ -338,9 +338,17 @@ async def main():
         target_chat = g.get("target_channels", "")
         if target_chat:
             try:
-                tc = int(target_chat.split(",")[0].strip())
+                import json
+                channels = json.loads(target_chat)
+                if isinstance(channels, list) and len(channels) > 0:
+                    tc = int(channels[0])
+                else:
+                    tc = 0
             except:
-                tc = 0
+                try:
+                    tc = int(target_chat)
+                except:
+                    tc = 0
         else:
             tc = 0
         m["target_chat_id"] = tc
