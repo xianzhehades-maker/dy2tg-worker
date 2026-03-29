@@ -6,6 +6,10 @@ on:
 
   workflow_dispatch:
 
+concurrency:
+  group: poll-and-process
+  cancel-in-progress: true
+
 jobs:
   poll-and-process:
     runs-on: ubuntu-latest
