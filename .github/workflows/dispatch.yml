@@ -27,7 +27,7 @@ on:
 
 concurrency:
   group: video-process-${{ github.event.client_payload.task_id || inputs.task_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   process:
