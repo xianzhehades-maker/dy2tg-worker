@@ -62,7 +62,39 @@ async def get_task_history():
         return [t.get("video_id") or t.get("task_id") for t in data.get("tasks", [])]
 
 
-async def dispatch_video_process(video_url: str, task_id: str, chat_id: int, video_desc: str):
+async def create_task_history(video_id: str, source_url: str, chat_id: int, group_id: int):
+    """在 CF Worker 中创建 task_history 记录"""
+    if not WORKERS_URL:
+        logger.error("WORKERS_URL 未配置，无法创建 task_history")
+        return False
+
+    url = f"{WORKERS_URL}/api/task_history"
+    headers = {}
+    if AUTH_TOKEN:
+        headers["X-Auth-Token"] = AUTH_TOKEN
+
+    payload = {
+        "video_id": video_id,
+        "source_url": source_url,
+        "chat_id": chat_id,
+        "group_id": group_id,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code in (200, 204):
+                logger.info(f"✅ 已创建 task_history: {video_id}")
+                return True
+            else:
+                logger.warning(f"创建 task_history 失败 (可能已存在): {resp.status_code}")
+                return True  # 即使失败也继续，因为可能记录已存在
+    except Exception as e:
+        logger.warning(f"创建 task_history 时出错: {e}")
+        return True  # 即使出错也继续
+
+
+async def dispatch_video_process(video_url: str, task_id: str, chat_id: int, video_desc: str, group_id: int):
     if not GH_REPO or not GH_PAT:
         logger.error("GH_REPO 或 GH_PAT 未配置")
         return False
@@ -85,6 +117,7 @@ async def dispatch_video_process(video_url: str, task_id: str, chat_id: int, vid
             "task_id": task_id,
             "chat_id": chat_id,
             "video_desc": video_desc,
+            "group_id": group_id,
         },
     }
 
@@ -259,7 +292,16 @@ async def poll_single_up(monitor, processed_ids: set):
 
     dispatched = 0
     group_id = monitor.get("group_id")
+    
+    # 限制：每次最多只处理最新的 5 个视频，防止触发过多工作流
+    max_videos_per_up = 5
+    processed_count = 0
+    
     for video in videos:
+        if processed_count >= max_videos_per_up:
+            logger.info(f"已达到每个UP最大处理数 {max_videos_per_up}，停止处理")
+            break
+            
         video_id = str(video.get("video_id", ""))
         if video_id in processed_ids:
             continue
@@ -267,14 +309,24 @@ async def poll_single_up(monitor, processed_ids: set):
         chat_id = monitor.get("target_chat_id") or 0
         desc = video.get("desc", "")[:100]
 
+        # 先创建 task_history 记录
+        await create_task_history(
+            video_id=video_id,
+            source_url=monitor.get("up_url"),
+            chat_id=chat_id,
+            group_id=group_id
+        )
+        
         success = await dispatch_video_process(
             video_url=monitor.get("up_url"),
             task_id=video_id,
             chat_id=chat_id,
-            video_desc=desc
+            video_desc=desc,
+            group_id=group_id
         )
         if success:
             dispatched += 1
+            processed_count += 1
             processed_ids.add(video_id)
 
     return dispatched
