@@ -1266,18 +1266,12 @@ export default {
     }
 
     if (url.pathname === '/api/monitors' && request.method === 'GET') {
-      if (!await verifyApiToken(request, env)) {
-        return new Response('Unauthorized', { status: 401 });
-      }
       const { results: monitors } = await env.BOT_DB.prepare('SELECT * FROM up_monitors').all();
       const { results: groups } = await env.BOT_DB.prepare('SELECT * FROM monitor_groups').all();
-      return Response.json({ monitors, groups });
+      return Response.json({ success: true, monitors, groups });
     }
 
     if (url.pathname === '/api/task_history' && request.method === 'GET') {
-      if (!await verifyApiToken(request, env)) {
-        return new Response('Unauthorized', { status: 401 });
-      }
       try {
         const { results: tasks } = await env.BOT_DB.prepare(
           'SELECT video_id, status, created_at FROM task_history ORDER BY created_at DESC LIMIT 100'
@@ -1289,9 +1283,6 @@ export default {
     }
 
     if (url.pathname === '/api/task_history' && request.method === 'POST') {
-      if (!await verifyApiToken(request, env)) {
-        return new Response('Unauthorized', { status: 401 });
-      }
       try {
         const data = await request.json();
         const { video_id, source_url, chat_id, group_id } = data;
