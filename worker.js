@@ -1469,9 +1469,15 @@ export default {
           'SELECT group_id, status FROM task_history WHERE source_url LIKE ? OR video_id = ?'
         ).bind(`%${task_id}%`, task_id).first();
 
-        if (existingTask && (existingTask.status === 'completed' || existingTask.status === 'sent' || existingTask.status === 'send_failed')) {
-          console.log('任务已完成或已发送，跳过重复回调:', task_id, '状态:', existingTask.status);
+        if (existingTask && (existingTask.status === 'completed' || existingTask.status === 'sent' || existingTask.status === 'send_failed' || existingTask.status === 'processing')) {
+          console.log('任务已完成或已发送或正在处理，跳过重复回调:', task_id, '状态:', existingTask.status);
           return new Response('Already processed', { status: 200 });
+        }
+
+        if (existingTask) {
+          await env.BOT_DB.prepare(
+            'UPDATE task_history SET status = ? WHERE (source_url LIKE ? OR video_id = ?) AND status = ?'
+          ).bind('processing', `%${task_id}%`, task_id, existingTask.status).run();
         }
 
         const groupId = existingTask ? existingTask.group_id : null;
