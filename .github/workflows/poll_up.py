@@ -21,7 +21,6 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DOUYIN_COOKIE = os.getenv("DOUYIN_COOKIE", "")
 PROXY_URL = os.getenv("PROXY_URL", "")
 
-# 把 tiktok_downloader 目录加到 sys.path 里，这样可以直接导入 src
 TIKTOK_DOWNLOADER_DIR = str(Path(__file__).resolve().parent.parent.parent / "tiktok_downloader")
 sys.path.insert(0, TIKTOK_DOWNLOADER_DIR)
 logger.info(f"TikTokDownloader 目录: {TIKTOK_DOWNLOADER_DIR}")
@@ -63,7 +62,6 @@ async def get_task_history():
 
 
 async def create_task_history(video_id: str, source_url: str, chat_id: int, group_id: int):
-    """在 CF Worker 中创建 task_history 记录"""
     if not WORKERS_URL:
         logger.error("WORKERS_URL 未配置，无法创建 task_history")
         return False
@@ -88,10 +86,10 @@ async def create_task_history(video_id: str, source_url: str, chat_id: int, grou
                 return True
             else:
                 logger.warning(f"创建 task_history 失败 (可能已存在): {resp.status_code}")
-                return True  # 即使失败也继续，因为可能记录已存在
+                return True
     except Exception as e:
         logger.warning(f"创建 task_history 时出错: {e}")
-        return True  # 即使出错也继续
+        return True
 
 
 async def dispatch_video_process(video_url: str, task_id: str, chat_id: int, video_desc: str, group_id: int):
@@ -140,39 +138,33 @@ def extract_sec_user_id(url: str) -> str:
 
 
 async def fetch_user_videos(sec_user_id: str):
-    """获取UP主页视频列表 - 使用 TikTokDownloader 项目（抖音版）"""
     try:
         from src.testers.params import Params
         from src.testers.logger import Logger
-        from src.interface.account import Account  # 注意：这里用 Account（抖音的），不是 AccountTikTok（TikTok 的）
+        from src.interface.account import Account
         from src.interface import API
         from src.extract.extractor import Extractor
         from src.tools.format import cookie_str_to_dict
         from src.encrypt.msToken import MsToken
         from src.custom import PARAMS_HEADERS
-        
-        # 创建一个 dummy recorder 类，只需要有 save 方法和 field_keys 属性
+
         class DummyRecorder:
             def __init__(self):
                 self.field_keys = []
             async def save(self, *args, **kwargs):
                 pass
-        
+
         API.init_progress_object(server_mode=True)
-        
+
         async with Params() as params:
-            # 设置 cookie
             if DOUYIN_COOKIE:
                 params.cookie_str = DOUYIN_COOKIE
                 params.headers["Cookie"] = DOUYIN_COOKIE
-                
-                # 从 cookie 字符串中提取 msToken 和 uifid（同时尝试大小写）
+
                 cookie_dict = cookie_str_to_dict(DOUYIN_COOKIE)
-                
-                # 提取 msToken（同时尝试大小写，如果没有就获取真实的）
+
                 ms_token = cookie_dict.get("msToken") or cookie_dict.get("mstoken") or cookie_dict.get("MSTOKEN")
                 if not ms_token:
-                    # 如果 cookie 里没有 msToken，就获取真实的 msToken
                     logger.info("从 cookie 中未找到 msToken，正在获取真实的 msToken...")
                     try:
                         real_ms_token = await MsToken.get_long_ms_token(
@@ -184,40 +176,33 @@ async def fetch_user_videos(sec_user_id: str):
                             ms_token = real_ms_token["msToken"]
                             logger.info(f"已获取到真实的 msToken: {ms_token[:20]}...")
                         else:
-                            # 如果获取失败，就生成假的
                             fake_ms_token = MsToken.get_fake_ms_token()
                             ms_token = fake_ms_token["msToken"]
                             logger.info(f"获取真实 msToken 失败，已生成假的 msToken: {ms_token[:20]}...")
                     except Exception as e:
                         logger.warning(f"获取真实 msToken 时出错: {e}")
-                        # 如果出错，就生成假的
                         fake_ms_token = MsToken.get_fake_ms_token()
                         ms_token = fake_ms_token["msToken"]
                         logger.info(f"已生成假的 msToken: {ms_token[:20]}...")
                 params.msToken = ms_token
                 API.params["msToken"] = ms_token
-                # 把 msToken 也加到 Cookie 字符串里
                 if DOUYIN_COOKIE:
                     updated_cookie = DOUYIN_COOKIE
                     if "msToken=" in updated_cookie:
-                        # 如果已有 msToken，替换它
                         import re
                         updated_cookie = re.sub(r'msToken=[^;]*', f'msToken={ms_token}', updated_cookie)
                     else:
-                        # 如果没有，追加到末尾
                         if not updated_cookie.endswith(';'):
                             updated_cookie += ';'
                         updated_cookie += f' msToken={ms_token}'
                     params.cookie_str = updated_cookie
                     params.headers["Cookie"] = updated_cookie
-                
-                # 提取 uifid（同时尝试 UIFID 和 uifid）
+
                 uifid = cookie_dict.get("UIFID") or cookie_dict.get("uifid")
                 if uifid:
                     params.uifid = uifid
                     API.params["uifid"] = uifid
-            
-            # 使用 Account（抖音的），不是 AccountTikTok
+
             account = Account(
                 params,
                 cookie=updated_cookie,
@@ -227,39 +212,36 @@ async def fetch_user_videos(sec_user_id: str):
                 cursor=0,
                 count=20
             )
-            
+
             raw_videos = await account.run(single_page=True)
             logger.info(f"从 Account（抖音）获取到 {len(raw_videos)} 个原始视频")
-            
+
             if not raw_videos:
                 return []
-            
-            # 使用 Extractor 转换数据，添加 downloads 字段（特殊下载链接）
+
             extractor = Extractor(params)
-            # 创建一个空的记录器，只用来提取数据
             dummy_recorder = DummyRecorder()
             formatted_videos = await extractor.run(raw_videos, dummy_recorder, type_="detail", tiktok=False)
-            
+
             logger.info(f"从 Extractor 转换后得到 {len(formatted_videos)} 个视频，包含 downloads 字段")
-            
-            # 转换为我们需要的格式
+
             result_videos = []
             for video in formatted_videos:
                 try:
                     video_id = video.get("id", "")
                     desc = video.get("desc", "")
-                    
+
                     if video_id:
                         result_videos.append({
                             "video_id": video_id,
                             "desc": desc,
-                            "raw_video": video,  # 包含 downloads 字段
-                            "downloads": video.get("downloads", [])  # 特殊下载链接
+                            "raw_video": video,
+                            "downloads": video.get("downloads", [])
                         })
                 except Exception as e:
                     logger.warning(f"处理视频数据时出错: {e}")
                     continue
-            
+
             return result_videos
     except Exception as e:
         logger.error(f"获取UP视频失败 {sec_user_id}: {e}")
@@ -292,16 +274,15 @@ async def poll_single_up(monitor, processed_ids: set):
 
     dispatched = 0
     group_id = monitor.get("group_id")
-    
-    # 限制：每次最多只处理最新的 5 个视频，防止触发过多工作流
+
     max_videos_per_up = 5
     processed_count = 0
-    
+
     for video in videos:
         if processed_count >= max_videos_per_up:
             logger.info(f"已达到每个UP最大处理数 {max_videos_per_up}，停止处理")
             break
-            
+
         video_id = str(video.get("video_id", ""))
         if video_id in processed_ids:
             continue
@@ -309,14 +290,13 @@ async def poll_single_up(monitor, processed_ids: set):
         chat_id = monitor.get("target_chat_id") or 0
         desc = video.get("desc", "")[:100]
 
-        # 先创建 task_history 记录
         await create_task_history(
             video_id=video_id,
             source_url=monitor.get("up_url"),
             chat_id=chat_id,
             group_id=group_id
         )
-        
+
         success = await dispatch_video_process(
             video_url=monitor.get("up_url"),
             task_id=video_id,
