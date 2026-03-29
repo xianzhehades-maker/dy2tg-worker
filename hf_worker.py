@@ -458,7 +458,7 @@ async def notify_callback_simple(task_id: str, chat_id: int, download_url: Optio
             callback_url = CALLBACK_URL
             if not callback_url.startswith('http'):
                 callback_url = 'https://' + callback_url
-            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=30.0, read=60.0, write=30.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=30.0, read=180.0, write=30.0)) as client:
                 resp = await client.post(callback_url, json=payload, headers=headers)
                 resp.raise_for_status()
                 logger.info(f"回调通知成功: {resp.status_code}")
