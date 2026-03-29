@@ -130,6 +130,8 @@ const HELP_TEXT = `🤖 Bot 命令帮助
 /reset_task <video_id> - 重置单个任务
 /reset_task all - 重置所有处理中的任务
 /clear_tasks - 清空所有任务记录
+/clean_r2 - 清理R2存储中的文件
+   用法: /clean_r2 [list|purge|all|failed|<video_id>]
 /test_target <group_id> - 测试目标频道发送
 /sync_ids - 同步频道chat_id
 /sync - 同步配置
@@ -759,6 +761,177 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
       await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 重置任务失败: ${e.message}`);
     }
     return true;
+  }
+
+  if (cmd === '/clean_r2') {
+    try {
+      const mode = args[0] || 'failed';
+
+      if (!['all', 'failed', 'list', 'purge'].includes(mode) && !mode.match(/^\d+$/)) {
+        await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 用法:\n/clean_r2 list - 列出R2中的所有文件\n/clean_r2 purge - 清空整个R2存储桶\n/clean_r2 failed - 清理失败任务的R2文件\n/clean_r2 all - 清理所有任务的R2文件\n/clean_r2 <video_id> - 清理指定视频的R2文件');
+        return true;
+      }
+
+      if (!env.VIDEO_BUCKET) {
+        await sendToTelegram(env.BOT_TOKEN, chatId, '❌ R2 存储桶未绑定，请检查 wrangler.toml 配置');
+        return true;
+      }
+
+      if (mode === 'list') {
+        try {
+          const listed = await env.VIDEO_BUCKET.list();
+          let fileList = '📁 R2 存储桶中的文件:\n\n';
+          if (listed.objects && listed.objects.length > 0) {
+            listed.objects.forEach((obj, i) => {
+              fileList += `${i + 1}. ${obj.key} (${Math.round(obj.size / 1024)} KB)\n`;
+            });
+            fileList += `\n总计: ${listed.objects.length} 个文件`;
+          } else {
+            fileList += '存储桶为空';
+          }
+          await sendToTelegram(env.BOT_TOKEN, chatId, fileList);
+          return true;
+        } catch (listError) {
+          console.error('列出 R2 文件失败:', listError);
+          await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 列出文件失败: ${listError.message}`);
+          return true;
+        }
+      }
+
+      if (mode === 'purge') {
+        try {
+          await sendToTelegram(env.BOT_TOKEN, chatId, '⚠️ 正在清空整个 R2 存储桶...');
+
+          const listed = await env.VIDEO_BUCKET.list();
+          if (!listed.objects || listed.objects.length === 0) {
+            await sendToTelegram(env.BOT_TOKEN, chatId, '📋 存储桶已经是空的了');
+            return true;
+          }
+
+          let deletedCount = 0;
+          let failedCount = 0;
+
+          for (const obj of listed.objects) {
+            try {
+              await env.VIDEO_BUCKET.delete(obj.key);
+              console.log(`已删除: ${obj.key}`);
+              deletedCount++;
+            } catch (delError) {
+              console.error(`删除失败 ${obj.key}:`, delError);
+              failedCount++;
+            }
+          }
+
+          let message = `✅ 清空完成\n\n`;
+          message += `已删除: ${deletedCount} 个文件\n`;
+          if (failedCount > 0) {
+            message += `失败: ${failedCount} 个`;
+          }
+
+          await sendToTelegram(env.BOT_TOKEN, chatId, message);
+          return true;
+        } catch (purgeError) {
+          console.error('清空 R2 存储桶失败:', purgeError);
+          await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 清空失败: ${purgeError.message}`);
+          return true;
+        }
+      }
+
+      let tasksToClean = [];
+      let query;
+
+      if (mode === 'all') {
+        query = 'SELECT video_id, r2_url FROM task_history WHERE r2_url IS NOT NULL';
+      } else if (mode === 'failed') {
+        query = 'SELECT video_id, r2_url FROM task_history WHERE r2_url IS NOT NULL AND (status = ? OR status = ?)';
+      } else {
+        query = 'SELECT video_id, r2_url FROM task_history WHERE r2_url IS NOT NULL AND video_id = ?';
+      }
+
+      let stmt;
+      if (mode === 'all') {
+        stmt = env.BOT_DB.prepare(query);
+      } else if (mode === 'failed') {
+        stmt = env.BOT_DB.prepare(query).bind('failed', 'error');
+      } else {
+        stmt = env.BOT_DB.prepare(query).bind(mode);
+      }
+
+      const { results } = await stmt.all();
+      tasksToClean = results || [];
+
+      if (tasksToClean.length === 0) {
+        await sendToTelegram(env.BOT_TOKEN, chatId, '📋 没有需要清理的R2文件（数据库中没有记录）\n使用 /clean_r2 list 查看R2存储桶中的实际文件');
+        return true;
+      }
+
+      await sendToTelegram(env.BOT_TOKEN, chatId, `🔄 准备清理 ${tasksToClean.length} 个任务的R2文件...`);
+
+      let deletedCount = 0;
+      let failedCount = 0;
+      let skippedCount = 0;
+
+      for (const task of tasksToClean) {
+        if (!task.r2_url) continue;
+
+        try {
+          let objectKey = `${task.video_id}_out.mp4`;
+
+          try {
+            const url = new URL(task.r2_url);
+            const pathParts = url.pathname.split('/').filter(p => p);
+            if (pathParts.length > 0) {
+              objectKey = pathParts[pathParts.length - 1];
+            }
+          } catch (e) {
+          }
+
+          let fileExists = false;
+          try {
+            const head = await env.VIDEO_BUCKET.head(objectKey);
+            if (head) {
+              fileExists = true;
+            }
+          } catch (headError) {
+          }
+
+          if (fileExists) {
+            try {
+              await env.VIDEO_BUCKET.delete(objectKey);
+              console.log(`已删除 R2 文件: ${objectKey}`);
+              deletedCount++;
+            } catch (r2Error) {
+              console.error(`删除 R2 文件失败 ${objectKey}:`, r2Error);
+              failedCount++;
+            }
+          } else {
+            console.log(`R2 文件不存在: ${objectKey}`);
+            skippedCount++;
+          }
+
+          await env.BOT_DB.prepare(
+            'UPDATE task_history SET r2_url = NULL WHERE video_id = ?'
+          ).bind(task.video_id).run();
+        } catch (e) {
+          console.error(`清理失败 ${task.video_id}:`, e);
+          failedCount++;
+        }
+      }
+
+      let message = `✅ 清理完成\n\n`;
+      message += `已删除: ${deletedCount} 个文件\n`;
+      message += `跳过(不存在): ${skippedCount} 个\n`;
+      if (failedCount > 0) {
+        message += `失败: ${failedCount} 个`;
+      }
+
+      await sendToTelegram(env.BOT_TOKEN, chatId, message);
+      return true;
+    } catch (e) {
+      console.error('清理R2文件失败:', e);
+      await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 清理失败: ${e.message}`);
+      return true;
+    }
   }
 
   if (cmd === '/retry_failed') {
