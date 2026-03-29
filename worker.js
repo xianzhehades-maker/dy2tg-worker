@@ -1266,14 +1266,56 @@ export default {
     }
 
     if (url.pathname === '/api/monitors' && request.method === 'GET') {
+      if (!await verifyApiToken(request, env)) {
+        return new Response('Unauthorized', { status: 401 });
+      }
       const { results: monitors } = await env.BOT_DB.prepare('SELECT * FROM up_monitors').all();
       const { results: groups } = await env.BOT_DB.prepare('SELECT * FROM monitor_groups').all();
       return Response.json({ monitors, groups });
     }
 
     if (url.pathname === '/api/task_history' && request.method === 'GET') {
-      const { results: tasks } = await env.BOT_DB.prepare('SELECT * FROM task_history ORDER BY created_at DESC LIMIT 100').all();
-      return Response.json({ tasks });
+      if (!await verifyApiToken(request, env)) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      try {
+        const { results: tasks } = await env.BOT_DB.prepare(
+          'SELECT video_id, status, created_at FROM task_history ORDER BY created_at DESC LIMIT 100'
+        ).all();
+        return Response.json({ success: true, tasks });
+      } catch (e) {
+        return Response.json({ success: false, error: e.message }, { status: 500 });
+      }
+    }
+
+    if (url.pathname === '/api/task_history' && request.method === 'POST') {
+      if (!await verifyApiToken(request, env)) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      try {
+        const data = await request.json();
+        const { video_id, source_url, chat_id, group_id } = data;
+
+        if (!video_id) {
+          return Response.json({ success: false, error: 'Missing video_id' }, { status: 400 });
+        }
+
+        const existing = await env.BOT_DB.prepare(
+          'SELECT id, status FROM task_history WHERE video_id = ?'
+        ).bind(video_id).first();
+
+        if (existing) {
+          return Response.json({ success: true, message: 'Video already exists', status: existing.status });
+        }
+
+        await env.BOT_DB.prepare(
+          'INSERT INTO task_history (video_id, source_url, chat_id, group_id, status) VALUES (?, ?, ?, ?, ?)'
+        ).bind(video_id, source_url || '', chat_id || 0, group_id || 1, 'pending').run();
+
+        return Response.json({ success: true, video_id });
+      } catch (e) {
+        return Response.json({ success: false, error: e.message }, { status: 500 });
+      }
     }
 
     if (url.pathname === '/webhook' && request.method === 'POST') {
