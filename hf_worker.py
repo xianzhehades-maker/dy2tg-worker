@@ -427,8 +427,9 @@ def upload_to_r2_simple(file_path: str, object_name: str) -> Optional[str]:
         return None
 
 
-async def notify_callback_simple(task_id: str, chat_id: int, download_url: Optional[str], caption: Optional[str], success: bool):
+async def notify_callback_simple(task_id: str, chat_id: int, download_url: Optional[str], caption: Optional[str], success: bool, group_id: Optional[int] = None):
     logger.info(f"DEBUG: CALLBACK_URL = {CALLBACK_URL}")
+    logger.info(f"准备发送回调，参数: task_id={task_id}, chat_id={chat_id}, success={success}, group_id={group_id}")
     if not CALLBACK_URL:
         logger.warning("未配置回调地址，跳过通知")
         return
@@ -444,8 +445,10 @@ async def notify_callback_simple(task_id: str, chat_id: int, download_url: Optio
                 "download_url": download_url,
                 "caption": caption,
                 "success": success,
-                "error": None if success else "处理失败"
+                "error": None if success else "处理失败",
+                "group_id": group_id
             }
+            logger.info(f"回调 payload: {payload}")
 
             headers = {}
             if AUTH_TOKEN:
@@ -504,6 +507,7 @@ async def process_video_task(
     generate_ai_caption: bool = False,
     video_desc: Optional[str] = None,
     caption_style: Optional[str] = None,
+    group_id: Optional[int] = None,
 ):
     input_path = f"/tmp/{task_id}_in.mp4"
     output_path = f"/tmp/exports/{task_id}_out.mp4"
@@ -522,7 +526,7 @@ async def process_video_task(
 
         success, fresh_video_desc = await download_video_real(video_url, input_path, task_id)
         if not success:
-            await notify_callback_simple(task_id, chat_id, None, None, False)
+            await notify_callback_simple(task_id, chat_id, None, None, False, group_id)
             return
 
         if fresh_video_desc:
@@ -581,17 +585,17 @@ async def process_video_task(
 
         if not download_url:
             logger.error("R2 上传失败")
-            await notify_callback_simple(task_id, chat_id, None, None, False)
+            await notify_callback_simple(task_id, chat_id, None, None, False, group_id)
             return
 
         success = True
-        await notify_callback_simple(task_id, chat_id, download_url, final_caption, success)
+        await notify_callback_simple(task_id, chat_id, download_url, final_caption, success, group_id)
 
     except Exception as e:
         logger.error(f"任务处理异常: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        await notify_callback_simple(task_id, chat_id, None, None, False)
+        await notify_callback_simple(task_id, chat_id, None, None, False, group_id)
 
     finally:
         # CF Worker 负责任务管理，这里只清理临时文件
@@ -746,6 +750,7 @@ async def process_video_cli():
     video_desc = os.getenv("VIDEO_DESC", "")
     generate_ai_caption = os.getenv("GENERATE_AI_CAPTION", "false").lower() == "true"
     caption_style = os.getenv("CAPTION_STYLE", "")
+    group_id = os.getenv("GROUP_ID")
 
     if not video_url or not task_id:
         logger.error("缺少 VIDEO_URL 或 TASK_ID 环境变量")
@@ -757,6 +762,7 @@ async def process_video_cli():
     try:
         chat_id_int = int(chat_id) if chat_id else 0
 
+        group_id_int = int(group_id) if group_id else None
         await process_video_task(
             task_id=task_id,
             video_url=video_url,
@@ -765,7 +771,8 @@ async def process_video_cli():
             watermark_text=None,
             generate_ai_caption=generate_ai_caption,
             video_desc=video_desc or None,
-            caption_style=caption_style or None
+            caption_style=caption_style or None,
+            group_id=group_id_int
         )
 
         return True
