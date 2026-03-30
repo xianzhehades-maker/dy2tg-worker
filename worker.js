@@ -32,8 +32,9 @@ async function sendVideoToTelegram(botToken, chatId, videoUrl, caption = null) {
     body: JSON.stringify(payload),
   });
   const result = await response.json();
-  console.log(`[Telegram sendVideo] chat_id=${chatId}, message_id=${result.result?.message_id}, ok=${result.ok}, error=${result.description || ''}`);
-  return result;
+  const messageId = result.result?.message_id;
+  console.log(`[Telegram sendVideo] chat_id=${chatId}, message_id=${messageId}, ok=${result.ok}, error=${result.description || ''}`);
+  return { ok: result.ok, messageId, error: result.description };
 }
 
 function extractVideoId(url) {
@@ -1518,21 +1519,25 @@ export default {
                 if (group) {
                   const channels = parseTargetChannels(group.target_channels);
                   if (channels.length > 0) {
+                    let firstMessageId = null;
                     for (const channel of channels) {
                       const channelId = channel.replace('@', '');
-                      await sendVideoToTelegram(env.BOT_TOKEN, channelId, download_url, finalCaption);
+                      const result = await sendVideoToTelegram(env.BOT_TOKEN, channelId, download_url, finalCaption);
+                      if (firstMessageId === null && result.messageId) {
+                        firstMessageId = result.messageId;
+                      }
                     }
                     await env.BOT_DB.prepare(
-                      'UPDATE task_history SET status = ?, r2_url = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
-                    ).bind('completed', download_url, task_id).run();
+                      'UPDATE task_history SET status = ?, r2_url = ?, telegram_message_id = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
+                    ).bind('completed', download_url, firstMessageId, task_id).run();
                     return;
                   }
                 }
               }
-              await sendVideoToTelegram(env.BOT_TOKEN, chat_id, download_url, finalCaption);
+              const result = await sendVideoToTelegram(env.BOT_TOKEN, chat_id, download_url, finalCaption);
               await env.BOT_DB.prepare(
-                'UPDATE task_history SET status = ?, r2_url = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
-              ).bind('completed', download_url, task_id).run();
+                'UPDATE task_history SET status = ?, r2_url = ?, telegram_message_id = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
+              ).bind('completed', download_url, result.messageId, task_id).run();
             } catch (sendError) {
               console.error('发送视频失败:', sendError);
               await env.BOT_DB.prepare(

@@ -12,7 +12,7 @@ binding = "VIDEO_BUCKET"
 bucket_name = "video-assets"
 
 [triggers]
-crons = ["*/1 * * * *"]
+# crons = ["*/1 * * * *"]  # 暂时禁用自动轮询
 
 # 需要配置以下 secrets（wrangler secret put）:
 # GH_REPO = "owner/repo"         # GitHub 仓库，如 "username/dy2tg-github"
