@@ -1487,23 +1487,6 @@ export default {
 
         const { task_id, chat_id, download_url, caption, success, error, video_desc } = data;
 
-        const existingTask = await env.BOT_DB.prepare(
-          'SELECT group_id, status FROM task_history WHERE video_id = ?'
-        ).bind(task_id).first();
-
-        if (existingTask && (existingTask.status === 'completed' || existingTask.status === 'sent' || existingTask.status === 'send_failed' || existingTask.status === 'processing')) {
-          console.log('任务已完成或已发送或正在处理，跳过重复回调:', task_id, '状态:', existingTask.status);
-          return new Response('Already processed', { status: 200 });
-        }
-
-        if (existingTask) {
-          await env.BOT_DB.prepare(
-            'UPDATE task_history SET status = ? WHERE video_id = ? AND status = ?'
-          ).bind('processing', task_id, existingTask.status).run();
-        }
-
-        const groupId = existingTask ? existingTask.group_id : null;
-
         const processCallback = async () => {
           if (success && download_url) {
             try {
@@ -1511,44 +1494,38 @@ export default {
                 ? `${video_desc}\n\n---\n\n${caption}`
                 : (caption || video_desc || '视频处理完成');
 
+              let firstMessageId = null;
+              let targetChannels = [];
+
               if (groupId) {
                 const group = await env.BOT_DB.prepare(
                   'SELECT target_channels FROM monitor_groups WHERE id = ?'
                 ).bind(groupId).first();
-
                 if (group) {
-                  const channels = parseTargetChannels(group.target_channels);
-                  if (channels.length > 0) {
-                    let firstMessageId = null;
-                    for (const channel of channels) {
-                      const channelId = channel.replace('@', '');
-                      const result = await sendVideoToTelegram(env.BOT_TOKEN, channelId, download_url, finalCaption);
-                      if (firstMessageId === null && result.messageId) {
-                        firstMessageId = result.messageId;
-                      }
-                    }
-                    await env.BOT_DB.prepare(
-                      'UPDATE task_history SET status = ?, r2_url = ?, telegram_message_id = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
-                    ).bind('completed', download_url, firstMessageId, task_id).run();
-                    return;
-                  }
+                  targetChannels = parseTargetChannels(group.target_channels);
                 }
               }
-              const result = await sendVideoToTelegram(env.BOT_TOKEN, chat_id, download_url, finalCaption);
+
+              if (targetChannels.length > 0) {
+                for (const channel of targetChannels) {
+                  const channelId = channel.replace('@', '');
+                  const result = await sendVideoToTelegram(env.BOT_TOKEN, channelId, download_url, finalCaption);
+                  if (firstMessageId === null && result.messageId) {
+                    firstMessageId = result.messageId;
+                  }
+                }
+              } else {
+                const result = await sendVideoToTelegram(env.BOT_TOKEN, chat_id, download_url, finalCaption);
+                firstMessageId = result.messageId;
+              }
+
               await env.BOT_DB.prepare(
-                'UPDATE task_history SET status = ?, r2_url = ?, telegram_message_id = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
-              ).bind('completed', download_url, result.messageId, task_id).run();
+                'INSERT OR REPLACE INTO task_history (video_id, source_url, r2_url, telegram_message_id, status, completed_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)'
+              ).bind(task_id, source_url || '', download_url, firstMessageId, 'completed').run();
+
             } catch (sendError) {
-              console.error('发送视频失败:', sendError);
-              await env.BOT_DB.prepare(
-                'UPDATE task_history SET status = ?, error_msg = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
-              ).bind('send_failed', sendError.message, task_id).run();
-              await sendToTelegram(env.BOT_TOKEN, chat_id, '❌ 视频发送失败，但处理已完成');
+              console.error('发送视频失败，不写入记录:', sendError.message);
             }
-          } else {
-            await env.BOT_DB.prepare(
-              'UPDATE task_history SET status = ?, error_msg = ?, completed_at = CURRENT_TIMESTAMP WHERE video_id = ?'
-            ).bind('failed', error || '未知错误', task_id).run();
           }
         };
 

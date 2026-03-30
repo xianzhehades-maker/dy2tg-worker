@@ -421,7 +421,7 @@ def upload_to_r2_simple(file_path: str, object_name: str) -> Optional[str]:
         return None
 
 
-async def notify_callback_simple(task_id: str, chat_id: int, download_url: Optional[str], caption: Optional[str], success: bool, group_id: Optional[int] = None, video_desc: Optional[str] = None):
+async def notify_callback_simple(task_id: str, chat_id: int, download_url: Optional[str], caption: Optional[str], success: bool, group_id: Optional[int] = None, video_desc: Optional[str] = None, source_url: Optional[str] = None):
     logger.info(f"DEBUG: CALLBACK_URL = {CALLBACK_URL}")
     logger.info(f"准备发送回调，参数: task_id={task_id}, chat_id={chat_id}, success={success}, group_id={group_id}")
     if not CALLBACK_URL:
@@ -441,7 +441,8 @@ async def notify_callback_simple(task_id: str, chat_id: int, download_url: Optio
                 "success": success,
                 "error": None if success else "处理失败",
                 "group_id": group_id,
-                "video_desc": video_desc
+                "video_desc": video_desc,
+                "source_url": source_url
             }
             logger.info(f"回调 payload: {payload}")
 
@@ -580,17 +581,17 @@ async def process_video_task(
 
         if not download_url:
             logger.error("R2 上传失败")
-            await notify_callback_simple(task_id, chat_id, None, None, False, group_id)
+            await notify_callback_simple(task_id, chat_id, None, None, False, group_id, source_url=video_url)
             return
 
         success = True
-        await notify_callback_simple(task_id, chat_id, download_url, final_caption, success, group_id, fresh_video_desc)
+        await notify_callback_simple(task_id, chat_id, download_url, final_caption, success, group_id, fresh_video_desc, source_url=video_url)
 
     except Exception as e:
         logger.error(f"任务处理异常: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        await notify_callback_simple(task_id, chat_id, None, None, False, group_id)
+        await notify_callback_simple(task_id, chat_id, None, None, False, group_id, source_url=video_url)
 
     finally:
         # CF Worker 负责任务管理，这里只清理临时文件

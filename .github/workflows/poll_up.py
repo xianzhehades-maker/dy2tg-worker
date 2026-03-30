@@ -314,17 +314,6 @@ async def poll_single_up(monitor, task_history: dict):
 
         logger.info(f"视频 {video_id} 状态={existing_status or '新视频'}，准备处理")
 
-        task_status = await create_task_history(
-            video_id=video_id,
-            source_url=monitor.get("up_url"),
-            chat_id=chat_id,
-            group_id=group_id
-        )
-
-        if task_status == "completed":
-            logger.info(f"视频 {video_id} 已完成发送，跳过")
-            continue
-
         success = await dispatch_video_process(
             video_url=monitor.get("up_url"),
             task_id=video_id,
