@@ -19,6 +19,7 @@ GH_REPO = os.getenv("GH_REPO", "")
 GH_PAT = os.getenv("GH_PAT", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 DOUYIN_COOKIE = os.getenv("DOUYIN_COOKIE", "")
+TIKTOK_COOKIE = os.getenv("TIKTOK_COOKIE", "")
 PROXY_URL = os.getenv("PROXY_URL", "")
 
 TIKTOK_DOWNLOADER_DIR = str(Path(__file__).resolve().parent.parent.parent / "tiktok_downloader")
@@ -137,11 +138,15 @@ def extract_sec_user_id(url: str) -> str:
     return None
 
 
-async def fetch_user_videos(sec_user_id: str):
+async def fetch_user_videos(sec_user_id: str, platform: str = "douyin"):
+    is_tiktok = platform.lower() == "tiktok"
+    cookie = TIKTOK_COOKIE if is_tiktok else DOUYIN_COOKIE
+
     try:
         from src.testers.params import Params
         from src.testers.logger import Logger
         from src.interface.account import Account
+        from src.interface.account_tiktok import AccountTikTok
         from src.interface import API
         from src.extract.extractor import Extractor
         from src.tools.format import cookie_str_to_dict
@@ -157,15 +162,15 @@ async def fetch_user_videos(sec_user_id: str):
         API.init_progress_object(server_mode=True)
 
         async with Params() as params:
-            if DOUYIN_COOKIE:
-                params.cookie_str = DOUYIN_COOKIE
-                params.headers["Cookie"] = DOUYIN_COOKIE
+            if cookie:
+                params.cookie_str = cookie
+                params.headers["Cookie"] = cookie
 
-                cookie_dict = cookie_str_to_dict(DOUYIN_COOKIE)
+                cookie_dict = cookie_str_to_dict(cookie)
 
                 ms_token = cookie_dict.get("msToken") or cookie_dict.get("mstoken") or cookie_dict.get("MSTOKEN")
                 if not ms_token:
-                    logger.info("从 cookie 中未找到 msToken，正在获取真实的 msToken...")
+                    logger.info(f"从 cookie 中未找到 msToken，正在获取真实的 msToken...")
                     try:
                         real_ms_token = await MsToken.get_long_ms_token(
                             Logger(),
@@ -186,8 +191,10 @@ async def fetch_user_videos(sec_user_id: str):
                         logger.info(f"已生成假的 msToken: {ms_token[:20]}...")
                 params.msToken = ms_token
                 API.params["msToken"] = ms_token
-                if DOUYIN_COOKIE:
-                    updated_cookie = DOUYIN_COOKIE
+                if is_tiktok:
+                    params.msToken_tiktok = ms_token
+                if cookie:
+                    updated_cookie = cookie
                     if "msToken=" in updated_cookie:
                         import re
                         updated_cookie = re.sub(r'msToken=[^;]*', f'msToken={ms_token}', updated_cookie)
@@ -203,7 +210,8 @@ async def fetch_user_videos(sec_user_id: str):
                     params.uifid = uifid
                     API.params["uifid"] = uifid
 
-            account = Account(
+            AccountClass = AccountTikTok if is_tiktok else Account
+            account = AccountClass(
                 params,
                 cookie=updated_cookie,
                 proxy=PROXY_URL if PROXY_URL else None,
@@ -214,14 +222,14 @@ async def fetch_user_videos(sec_user_id: str):
             )
 
             raw_videos = await account.run(single_page=True)
-            logger.info(f"从 Account（抖音）获取到 {len(raw_videos)} 个原始视频")
+            logger.info(f"从 Account{'TikTok' if is_tiktok else '（抖音）'}获取到 {len(raw_videos)} 个原始视频")
 
             if not raw_videos:
                 return []
 
             extractor = Extractor(params)
             dummy_recorder = DummyRecorder()
-            formatted_videos = await extractor.run(raw_videos, dummy_recorder, type_="detail", tiktok=False)
+            formatted_videos = await extractor.run(raw_videos, dummy_recorder, type_="detail", tiktok=is_tiktok)
 
             logger.info(f"从 Extractor 转换后得到 {len(formatted_videos)} 个视频，包含 downloads 字段")
 
@@ -267,7 +275,8 @@ async def poll_single_up(monitor, processed_ids: set):
         logger.warning(f"无法提取 sec_user_id: {monitor['up_url']}")
         return 0
 
-    videos = await fetch_user_videos(sec_user_id)
+    platform = monitor.get("platform", "douyin")
+    videos = await fetch_user_videos(sec_user_id, platform)
     if not videos:
         logger.info(f"UP {monitor['up_name']} 无新视频")
         return 0
