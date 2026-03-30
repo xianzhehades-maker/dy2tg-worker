@@ -22,7 +22,7 @@ def main():
     from pyrogram import Client, filters
     from pyrogram.types import Message
 
-    from database import DatabaseManager
+    from hf.database.manager import DatabaseManager
     from hf.database.models import MonitorGroup, GroupMonitor, GroupTarget
     import config
 
@@ -344,48 +344,58 @@ def main():
         
         async def handle_status(self, message: Message):
             """Handle /status - View all groups status"""
-            groups = self.db.get_monitor_groups()
-            
-            if not groups:
-                await message.reply_text("No groups configured")
-                return
-            
-            result = "System Status\n" + "="*40 + "\n\n"
-            
-            for group in groups:
-                monitors = self.db.get_group_monitors(group.id)
-                targets = self.db.get_group_targets(group.id)
+            try:
+                print(f"[DEBUG] handle_status called")
+                groups = self.db.get_monitor_groups()
+                print(f"[DEBUG] Got {len(groups) if groups else 0} groups")
                 
-                result += f"Group {group.id}: {group.name}\n"
-                if group.ai_caption_style:
-                    result += f"  Caption Style: {group.ai_caption_style}\n"
-                result += f"  Monitors: {len(monitors)}\n"
-                result += f"  Targets: {len(targets)}\n"
+                if not groups:
+                    await message.reply_text("No groups configured")
+                    return
                 
-                if monitors:
-                    result += "  Monitor list:\n"
-                    for m in monitors[:5]:
-                        result += f"    - {m.up_name}: {m.up_url[:30]}...\n"
-                    if len(monitors) > 5:
-                        result += f"    ... and {len(monitors)-5} more\n"
+                result = "System Status\n" + "="*40 + "\n\n"
                 
-                if targets:
-                    result += "  Target list:\n"
-                    for t in targets:
-                        result += f"    - {t.target_channel}"
-                        if t.chat_id:
-                            result += f" (ID: {t.chat_id})"
-                        result += "\n"
+                for group in groups:
+                    monitors = self.db.get_group_monitors(group.id)
+                    targets = self.db.get_group_targets(group.id)
+                    
+                    result += f"Group {group.id}: {group.name}\n"
+                    if group.ai_caption_style:
+                        result += f"  Caption Style: {group.ai_caption_style}\n"
+                    result += f"  Monitors: {len(monitors)}\n"
+                    result += f"  Targets: {len(targets)}\n"
+                    
+                    if monitors:
+                        result += "  Monitor list:\n"
+                        for m in monitors[:5]:
+                            result += f"    - {m.up_name}: {m.up_url[:30]}...\n"
+                        if len(monitors) > 5:
+                            result += f"    ... and {len(monitors)-5} more\n"
+                    
+                    if targets:
+                        result += "  Target list:\n"
+                        for t in targets:
+                            result += f"    - {t.target_channel}"
+                            if t.chat_id:
+                                result += f" (ID: {t.chat_id})"
+                            result += "\n"
+                    
+                    if group.promotion_text:
+                        result += f"  Promotion: {group.promotion_text[:50]}...\n"
+                    
+                    result += "\n"
                 
-                if group.promotion_text:
-                    result += f"  Promotion: {group.promotion_text[:50]}...\n"
+                interval = self.db.get_system_config("check_interval", "3600")
+                result += f"Check interval: {interval} seconds\n"
                 
-                result += "\n"
-            
-            interval = self.db.get_system_config("check_interval", "3600")
-            result += f"Check interval: {interval} seconds\n"
-            
-            await message.reply_text(result)
+                print(f"[DEBUG] Sending reply, length: {len(result)}")
+                await message.reply_text(result)
+                print(f"[DEBUG] Reply sent successfully")
+            except Exception as e:
+                print(f"[ERROR] handle_status failed: {e}")
+                import traceback
+                traceback.print_exc()
+                await message.reply_text(f"Error: {str(e)}")
         
         async def handle_sync(self, message: Message):
             """Handle /sync - Force sync config to cloud"""
@@ -750,8 +760,9 @@ def main():
 
         async def handle_help(self, message: Message):
             """Handle /help - Show help message"""
-            print(f"[DEBUG] handle_help called")
-            help_text = """
+            try:
+                print(f"[DEBUG] handle_help called")
+                help_text = """
 Group Management System - Help
 
 Group Management:
@@ -796,14 +807,17 @@ Workflow Control:
 Help:
   /help - Show this help message
         """
-            print(f"[DEBUG] Sending help message...")
-            try:
+                print(f"[DEBUG] Sending help message...")
                 await message.reply_text(help_text.strip())
                 print(f"[DEBUG] Help message sent successfully")
             except Exception as e:
                 print(f"[DEBUG] Error sending help message: {e}")
                 import traceback
                 traceback.print_exc()
+                try:
+                    await message.reply_text(f"Error: {str(e)}")
+                except:
+                    pass
 
 
     print("="*60)
