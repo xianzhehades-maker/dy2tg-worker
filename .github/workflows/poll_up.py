@@ -309,11 +309,7 @@ async def poll_single_up(monitor, task_history: dict):
         existing_status = task_history.get(video_id, "")
 
         if existing_status == "completed":
-            logger.info(f"视频 {video_id} 已完成，跳过")
-            continue
-
-        if existing_status in ("pending", "processing"):
-            logger.info(f"视频 {video_id} 正在处理中(status={existing_status})，跳过")
+            logger.info(f"视频 {video_id} 已完成发送，跳过")
             continue
 
         logger.info(f"视频 {video_id} 状态={existing_status or '新视频'}，准备处理")
@@ -326,11 +322,7 @@ async def poll_single_up(monitor, task_history: dict):
         )
 
         if task_status == "completed":
-            logger.info(f"视频 {video_id} 已完成，跳过")
-            continue
-
-        if task_status in ("pending", "processing"):
-            logger.info(f"视频 {video_id} 已在处理中(status={task_status})，跳过")
+            logger.info(f"视频 {video_id} 已完成发送，跳过")
             continue
 
         success = await dispatch_video_process(
