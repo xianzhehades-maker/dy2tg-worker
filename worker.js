@@ -1485,7 +1485,7 @@ export default {
         const data = await request.json();
         console.log('收到回调:', JSON.stringify(data));
 
-        const { task_id, chat_id, download_url, caption, success, error, video_desc } = data;
+        const { task_id, chat_id, download_url, caption, success, error, video_desc, group_id, source_url } = data;
 
         const processCallback = async () => {
           if (success && download_url) {
@@ -1497,10 +1497,10 @@ export default {
               let firstMessageId = null;
               let targetChannels = [];
 
-              if (groupId) {
+              if (group_id) {
                 const group = await env.BOT_DB.prepare(
                   'SELECT target_channels FROM monitor_groups WHERE id = ?'
-                ).bind(groupId).first();
+                ).bind(group_id).first();
                 if (group) {
                   targetChannels = parseTargetChannels(group.target_channels);
                 }
