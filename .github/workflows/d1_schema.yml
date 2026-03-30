@@ -1,0 +1,16 @@
+name: D1 Schema Update
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Execute D1 SQL
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: d1 execute dy2tg_db --command "ALTER TABLE task_history ADD COLUMN telegram_message_id TEXT;" --remote
