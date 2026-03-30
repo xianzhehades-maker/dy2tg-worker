@@ -48,7 +48,7 @@ async def get_monitors():
 
 async def get_task_history():
     if not WORKERS_URL:
-        return []
+        return {}
 
     url = f"{WORKERS_URL}/api/task_history"
     headers = {}
@@ -59,7 +59,13 @@ async def get_task_history():
         resp = await client.get(url, headers=headers)
         resp.raise_for_status()
         data = resp.json()
-        return [t.get("video_id") or t.get("task_id") for t in data.get("tasks", [])]
+        result = {}
+        for t in data.get("tasks", []):
+            vid = t.get("video_id") or t.get("task_id")
+            status = t.get("status", "")
+            if vid:
+                result[vid] = status
+        return result
 
 
 async def create_task_history(video_id: str, source_url: str, chat_id: int, group_id: int):
@@ -83,14 +89,19 @@ async def create_task_history(video_id: str, source_url: str, chat_id: int, grou
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code in (200, 204):
+                result = resp.json() if resp.status_code == 200 else {}
+                if result.get("message") == "Video already exists":
+                    existing_status = result.get("status", "")
+                    logger.info(f"视频 {video_id} 已存在 (status={existing_status})")
+                    return existing_status
                 logger.info(f"✅ 已创建 task_history: {video_id}")
-                return True
+                return "pending"
             else:
-                logger.warning(f"创建 task_history 失败 (可能已存在): {resp.status_code}")
-                return True
+                logger.warning(f"创建 task_history 失败: {resp.status_code}")
+                return None
     except Exception as e:
         logger.warning(f"创建 task_history 时出错: {e}")
-        return True
+        return None
 
 
 async def dispatch_video_process(video_url: str, task_id: str, chat_id: int, video_desc: str, group_id: int):
@@ -269,7 +280,7 @@ async def notify_telegram(text: str):
             await client.post(url, json={"chat_id": chat_id, "text": text})
 
 
-async def poll_single_up(monitor, processed_ids: set):
+async def poll_single_up(monitor, task_history: dict):
     sec_user_id = extract_sec_user_id(monitor.get("up_url", ""))
     if not sec_user_id:
         logger.warning(f"无法提取 sec_user_id: {monitor['up_url']}")
@@ -293,22 +304,34 @@ async def poll_single_up(monitor, processed_ids: set):
             break
 
         video_id = str(video.get("video_id", ""))
-        if video_id in processed_ids:
-            continue
-
         chat_id = monitor.get("target_chat_id") or 0
         desc = video.get("desc", "")[:100]
+        existing_status = task_history.get(video_id, "")
 
-        if video_id in processed_ids:
-            logger.info(f"视频 {video_id} 已处理过，跳过")
+        if existing_status == "completed":
+            logger.info(f"视频 {video_id} 已完成，跳过")
             continue
 
-        await create_task_history(
+        if existing_status in ("pending", "processing"):
+            logger.info(f"视频 {video_id} 正在处理中(status={existing_status})，跳过")
+            continue
+
+        logger.info(f"视频 {video_id} 状态={existing_status or '新视频'}，准备处理")
+
+        task_status = await create_task_history(
             video_id=video_id,
             source_url=monitor.get("up_url"),
             chat_id=chat_id,
             group_id=group_id
         )
+
+        if task_status == "completed":
+            logger.info(f"视频 {video_id} 已完成，跳过")
+            continue
+
+        if task_status in ("pending", "processing"):
+            logger.info(f"视频 {video_id} 已在处理中(status={task_status})，跳过")
+            continue
 
         success = await dispatch_video_process(
             video_url=monitor.get("up_url"),
@@ -317,8 +340,6 @@ async def poll_single_up(monitor, processed_ids: set):
             video_desc=desc,
             group_id=group_id
         )
-
-        processed_ids.add(video_id)
 
         if success:
             dispatched += 1
@@ -363,13 +384,12 @@ async def main():
         m["target_chat_id"] = tc
         monitor_list.append(m)
 
-    task_history_ids = await get_task_history()
-    processed_ids = set(task_history_ids)
-    logger.info(f"已处理视频数: {len(processed_ids)}")
+    task_history = await get_task_history()
+    logger.info(f"已记录视频数: {len(task_history)}")
 
     total_dispatched = 0
     for m in monitor_list:
-        d = await poll_single_up(m, processed_ids)
+        d = await poll_single_up(m, task_history)
         total_dispatched += d
 
     logger.info(f"轮询完成，新视频: {total_dispatched}")
