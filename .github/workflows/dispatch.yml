@@ -100,6 +100,7 @@ jobs:
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
           WORKERS_URL: ${{ secrets.WORKERS_URL }}
           DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          TIKTOK_COOKIE: ${{ secrets.TIKTOK_COOKIE }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           WATERMARK_TEXT: ${{ secrets.WATERMARK_TEXT }}
           PROXY_URL: http://127.0.0.1:1080

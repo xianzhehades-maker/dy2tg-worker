@@ -77,6 +77,7 @@ jobs:
         env:
           WORKERS_URL: ${{ secrets.WORKERS_URL }}
           DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          TIKTOK_COOKIE: ${{ secrets.TIKTOK_COOKIE }}
           GH_REPO: ${{ github.repository }}
           GH_PAT: ${{ secrets.GH_PAT }}
           PROXY_URL: http://127.0.0.1:1080

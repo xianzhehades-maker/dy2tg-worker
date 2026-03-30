@@ -231,12 +231,16 @@ async def download_video_real(url: str, output_path: str, target_video_id: str =
     try:
         from src.testers.params import Params
         from src.testers.logger import Logger
-        from src.interface.account import Account  # 注意：这里用 Account（抖音的），不是 AccountTikTok
+        from src.interface.account import Account
+        from src.interface.account_tiktok import AccountTikTok
         from src.interface import API
         from src.extract.extractor import Extractor
         from src.tools.format import cookie_str_to_dict
         from src.encrypt.msToken import MsToken
         from src.custom import PARAMS_HEADERS
+
+        is_tiktok = "tiktok.com" in url.lower()
+        cookie = os.getenv('TIKTOK_COOKIE', '') if is_tiktok else (os.getenv('DOUYIN_COOKIE', '') or os.getenv('DOUYIN_COOKIES', ''))
         
         # 创建一个 dummy recorder 类，只需要有 save 方法和 field_keys 属性
         class DummyRecorder:
@@ -256,21 +260,15 @@ async def download_video_real(url: str, output_path: str, target_video_id: str =
 
         logger.info(f"sec_user_id: {sec_user_id}")
 
-        douyin_cookie = os.getenv('DOUYIN_COOKIE', '') or os.getenv('DOUYIN_COOKIES', '')
-        
         async with Params() as params:
-            # 设置 cookie
-            if douyin_cookie:
-                params.cookie_str = douyin_cookie
-                params.headers["Cookie"] = douyin_cookie
-                
-                # 从 cookie 字符串中提取 msToken 和 uifid（同时尝试大小写）
-                cookie_dict = cookie_str_to_dict(douyin_cookie)
-                
-                # 提取 msToken（同时尝试大小写，如果没有就获取真实的）
+            if cookie:
+                params.cookie_str = cookie
+                params.headers["Cookie"] = cookie
+
+                cookie_dict = cookie_str_to_dict(cookie)
+
                 ms_token = cookie_dict.get("msToken") or cookie_dict.get("mstoken") or cookie_dict.get("MSTOKEN")
                 if not ms_token:
-                    # 如果 cookie 里没有 msToken，就获取真实的 msToken
                     logger.info("从 cookie 中未找到 msToken，正在获取真实的 msToken...")
                     try:
                         real_ms_token = await MsToken.get_long_ms_token(
@@ -282,41 +280,37 @@ async def download_video_real(url: str, output_path: str, target_video_id: str =
                             ms_token = real_ms_token["msToken"]
                             logger.info(f"已获取到真实的 msToken: {ms_token[:20]}...")
                         else:
-                            # 如果获取失败，就生成假的
                             fake_ms_token = MsToken.get_fake_ms_token()
                             ms_token = fake_ms_token["msToken"]
                             logger.info(f"获取真实 msToken 失败，已生成假的 msToken: {ms_token[:20]}...")
                     except Exception as e:
                         logger.warning(f"获取真实 msToken 时出错: {e}")
-                        # 如果出错，就生成假的
                         fake_ms_token = MsToken.get_fake_ms_token()
                         ms_token = fake_ms_token["msToken"]
                         logger.info(f"已生成假的 msToken: {ms_token[:20]}...")
                 params.msToken = ms_token
                 API.params["msToken"] = ms_token
-                # 把 msToken 也加到 Cookie 字符串里
-                if douyin_cookie:
-                    updated_cookie = douyin_cookie
+                if is_tiktok:
+                    params.msToken_tiktok = ms_token
+                if cookie:
+                    updated_cookie = cookie
                     if "msToken=" in updated_cookie:
-                        # 如果已有 msToken，替换它
                         import re
                         updated_cookie = re.sub(r'msToken=[^;]*', f'msToken={ms_token}', updated_cookie)
                     else:
-                        # 如果没有，追加到末尾
                         if not updated_cookie.endswith(';'):
                             updated_cookie += ';'
                         updated_cookie += f' msToken={ms_token}'
                     params.cookie_str = updated_cookie
                     params.headers["Cookie"] = updated_cookie
-                
-                # 提取 uifid（同时尝试 UIFID 和 uifid）
+
                 uifid = cookie_dict.get("UIFID") or cookie_dict.get("uifid")
                 if uifid:
                     params.uifid = uifid
                     API.params["uifid"] = uifid
-            
-            # 使用 Account（抖音的），不是 AccountTikTok
-            account = Account(
+
+            AccountClass = AccountTikTok if is_tiktok else Account
+            account = AccountClass(
                 params,
                 cookie=updated_cookie,
                 proxy=PROXY_URL if PROXY_URL else None,
@@ -325,9 +319,9 @@ async def download_video_real(url: str, output_path: str, target_video_id: str =
                 cursor=0,
                 count=20
             )
-            
+
             raw_videos = await account.run(single_page=True)
-            logger.info(f"从 Account（抖音）获取到 {len(raw_videos)} 个原始视频")
+            logger.info(f"从 Account{'TikTok' if is_tiktok else '（抖音）'}获取到 {len(raw_videos)} 个原始视频")
             
             if not raw_videos:
                 logger.error("获取视频列表为空")
@@ -336,7 +330,7 @@ async def download_video_real(url: str, output_path: str, target_video_id: str =
             # 使用 Extractor 转换数据，添加 downloads 字段（特殊下载链接）
             extractor = Extractor(params)
             dummy_recorder = DummyRecorder()
-            formatted_videos = await extractor.run(raw_videos, dummy_recorder, type_="detail", tiktok=False)
+            formatted_videos = await extractor.run(raw_videos, dummy_recorder, type_="detail", tiktok=is_tiktok)
             
             logger.info(f"从 Extractor 转换后得到 {len(formatted_videos)} 个视频，包含 downloads 字段")
 
