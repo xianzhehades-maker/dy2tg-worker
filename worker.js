@@ -1514,7 +1514,9 @@ export default {
           if (success && download_url) {
             try {
               let finalCaption = video_desc || '视频处理完成';
-              if (caption && caption.trim().length > 0 && caption.trim() !== video_desc.trim()) {
+              if (!finalCaption || /^\d+$/.test(finalCaption.trim())) {
+                finalCaption = '视频处理完成';
+              } else if (caption && caption.trim().length > 0 && caption.trim() !== video_desc.trim()) {
                 finalCaption = `${finalCaption}\n\n---\n\n${caption}`;
               }
 
