@@ -593,20 +593,21 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
   if (cmd === '/status') {
     try {
       const { results: groups } = await env.BOT_DB.prepare('SELECT * FROM monitor_groups').all();
-      const { results: allTasks } = await env.BOT_DB.prepare('SELECT * FROM task_history').all();
       const { results: allMonitors } = await env.BOT_DB.prepare('SELECT * FROM up_monitors').all();
+
+      const { count: totalPending } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history WHERE status = 'pending'").first() || { count: 0 };
+      const { count: totalCompleted } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history WHERE status IN ('completed', 'uploaded')").first() || { count: 0 };
+      const { count: totalFailed } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history WHERE status IN ('failed', 'send_failed')").first() || { count: 0 };
+      const { count: totalTasks } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history").first() || { count: 0 };
 
       const lines = ['📊 系统状态\n'];
 
-      const totalPending = allTasks.filter(t => t.status === 'pending').length;
-      const totalCompleted = allTasks.filter(t => t.status === 'completed' || t.status === 'uploaded').length;
-      const totalFailed = allTasks.filter(t => t.status === 'failed' || t.status === 'send_failed').length;
       const globalInterval = await getGlobalConfig(env, 'check_interval');
 
       lines.push('【全局统计】');
       lines.push(`📦 总分组数: ${groups.length}`);
       lines.push(`👁️  总监控UP主: ${allMonitors.length}`);
-      lines.push(`🎬  总任务: ${allTasks.length}`);
+      lines.push(`🎬  总任务: ${totalTasks}`);
       lines.push(`   ⏳ 待处理: ${totalPending}`);
       lines.push(`   ✅ 已完成: ${totalCompleted}`);
       lines.push(`   ❌ 失败: ${totalFailed}`);
