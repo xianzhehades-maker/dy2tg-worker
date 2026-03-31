@@ -1319,7 +1319,7 @@ export default {
     if (url.pathname === '/api/task_history' && request.method === 'GET') {
       try {
         const { results: tasks } = await env.BOT_DB.prepare(
-          'SELECT video_id, status, created_at FROM task_history ORDER BY created_at DESC LIMIT 100'
+          'SELECT video_id, status FROM task_history ORDER BY created_at DESC'
         ).all();
         return Response.json({ success: true, tasks });
       } catch (e) {
