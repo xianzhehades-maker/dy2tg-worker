@@ -207,6 +207,7 @@ async def fetch_user_videos(sec_user_id: str, platform: str = "douyin"):
                 API.params["msToken"] = ms_token
                 if is_tiktok:
                     params.msToken_tiktok = ms_token
+                    AccountTikTok.params["msToken"] = ms_token
                 if cookie:
                     updated_cookie = cookie
                     if "msToken=" in updated_cookie:
