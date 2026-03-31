@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 WORKERS_URL = os.getenv("WORKERS_URL", "").rstrip("/")
-AUTH_TOKEN = os.getenv("CALLBACK_SECRET", "")
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
 GH_REPO = os.getenv("GH_REPO", "")
 GH_PAT = os.getenv("GH_PAT", "")
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
