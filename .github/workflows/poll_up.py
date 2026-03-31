@@ -296,13 +296,10 @@ async def poll_single_up(monitor, task_history: dict):
     group_id = monitor.get("group_id")
 
     max_videos_per_up = 5
-    processed_count = 0
+    recent_videos = videos[:max_videos_per_up]
+    logger.info(f"UP {monitor['up_name']} 最近 {len(recent_videos)} 个视频待检查")
 
-    for video in videos:
-        if processed_count >= max_videos_per_up:
-            logger.info(f"已达到每个UP最大处理数 {max_videos_per_up}，停止处理")
-            break
-
+    for video in recent_videos:
         video_id = str(video.get("video_id", ""))
         chat_id = monitor.get("target_chat_id") or 0
         desc = video.get("desc", "")[:100]
@@ -324,7 +321,6 @@ async def poll_single_up(monitor, task_history: dict):
 
         if success:
             dispatched += 1
-            processed_count += 1
 
     return dispatched
 
