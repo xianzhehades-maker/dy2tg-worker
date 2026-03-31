@@ -122,7 +122,8 @@ const HELP_TEXT = `🤖 Bot 命令帮助
   风格: default(口播), humor(乐子), none(无AI)
 /set_caption_lan <group_id> <语言> - 设置文案语言
   语言: chinese(中文), bilingual(双语)
-/set_caption_len <group_id> <字数> - 设置AI文案字数(50-500)
+/set_caption_len <group_id> <字数> - 设置AI文案字数(0=禁用,50-500)
+/generate_ai_caption <group_id> <True/False> - 开启/关闭AI文案生成
 
 【视频】
 直接发送抖音链接 - 添加视频任务(发送给当前对话)
@@ -523,7 +524,7 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
 
   if (cmd === '/set_caption_len') {
     if (args.length < 2) {
-      await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 用法: /set_caption_len <group_id> <字数(50-500)>');
+      await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 用法: /set_caption_len <group_id> <字数(0=禁用,50-500)>');
       return true;
     }
     const groupId = parseInt(args[0]);
@@ -532,8 +533,8 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
       await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 分组ID和字数必须是数字');
       return true;
     }
-    if (length < 50 || length > 500) {
-      await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 字数必须在50-500之间');
+    if (length !== 0 && (length < 50 || length > 500)) {
+      await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 字数必须是0(禁用)或50-500之间');
       return true;
     }
     try {
@@ -543,6 +544,28 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
       await sendToTelegram(env.BOT_TOKEN, chatId, `✅ AI文案字数已设置\n\n分组: ${groupId}\n字数: ${length}`);
     } catch (e) {
       await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 设置字数失败: ${e.message}`);
+    }
+    return true;
+  }
+
+  if (cmd === '/generate_ai_caption') {
+    if (args.length < 2) {
+      await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 用法: /generate_ai_caption <group_id> <True/False>');
+      return true;
+    }
+    const groupId = parseInt(args[0]);
+    const enabled = args[1].toLowerCase() === 'true';
+    if (isNaN(groupId)) {
+      await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 分组ID必须是数字');
+      return true;
+    }
+    try {
+      await env.BOT_DB.prepare(
+        'UPDATE monitor_groups SET generate_ai_caption = ? WHERE id = ?'
+      ).bind(enabled ? 'true' : 'false', groupId).run();
+      await sendToTelegram(env.BOT_TOKEN, chatId, `✅ AI文案生成已${enabled ? '开启' : '关闭'}\n\n分组: ${groupId}`);
+    } catch (e) {
+      await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 设置失败: ${e.message}`);
     }
     return true;
   }
