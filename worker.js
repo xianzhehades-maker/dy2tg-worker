@@ -659,7 +659,26 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
           lines.push(`   推广: ${g.promotion_text}`);
         }
       }
-      await sendToTelegram(env.BOT_TOKEN, chatId, lines.join('\n'));
+
+      const fullText = lines.join('\n');
+      if (fullText.length <= 4000) {
+        await sendToTelegram(env.BOT_TOKEN, chatId, fullText);
+      } else {
+        const chunks = [];
+        let current = '';
+        for (const line of lines) {
+          if (current.length + line.length + 1 > 4000) {
+            chunks.push(current);
+            current = line;
+          } else {
+            current += '\n' + line;
+          }
+        }
+        if (current) chunks.push(current);
+        for (const chunk of chunks) {
+          await sendToTelegram(env.BOT_TOKEN, chatId, chunk);
+        }
+      }
     } catch (e) {
       await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 获取分组失败: ${e.message}`);
     }
