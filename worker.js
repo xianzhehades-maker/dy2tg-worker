@@ -643,11 +643,8 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
         lines.push(`   UP主: ${groupMonitors.length} 个`);
 
         if (groupMonitors.length > 0) {
-          for (const m of groupMonitors.slice(0, 5)) {
+          for (const m of groupMonitors) {
             lines.push(`      • ${m.up_name} [${m.platform.toUpperCase()}]`);
-          }
-          if (groupMonitors.length > 5) {
-            lines.push(`      ... 还有 ${groupMonitors.length - 5} 个`);
           }
         }
 
