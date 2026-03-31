@@ -141,6 +141,7 @@ const HELP_TEXT = `🤖 Bot 命令帮助
 /run_now - 立即执行流水线
 /reset_task <video_id> - 重置单个任务
 /reset_task all - 重置所有处理中的任务
+/skip_task <video_id> - 永久跳过该任务
 /clear_tasks - 清空所有任务记录
 /clean_r2 - 清理R2存储中的文件
    用法: /clean_r2 [list|purge|all|failed|<video_id>]
@@ -803,6 +804,29 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
       await sendToTelegram(env.BOT_TOKEN, chatId, `✅ 已删除所有任务记录`);
     } catch (e) {
       await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 删除失败: ' + e.message);
+    }
+    return true;
+  }
+
+  if (cmd === '/skip_task') {
+    if (args.length === 0) {
+      await sendToTelegram(env.BOT_TOKEN, chatId, '❌ 用法: /skip_task <video_id> - 永久跳过该任务');
+      return true;
+    }
+
+    try {
+      const videoId = args[0];
+      const result = await env.BOT_DB.prepare(
+        "UPDATE task_history SET status = 'skipped' WHERE video_id = ?"
+      ).bind(videoId).run();
+
+      if (result.meta.changes > 0) {
+        await sendToTelegram(env.BOT_TOKEN, chatId, `✅ 已永久跳过任务: ${videoId}`);
+      } else {
+        await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 未找到任务: ${videoId}`);
+      }
+    } catch (e) {
+      await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 跳过任务失败: ${e.message}`);
     }
     return true;
   }

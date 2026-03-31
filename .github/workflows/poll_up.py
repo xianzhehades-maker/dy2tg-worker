@@ -312,6 +312,10 @@ async def poll_single_up(monitor, task_history: dict):
             logger.info(f"视频 {video_id} 已完成发送，跳过")
             continue
 
+        if existing_status == "skipped":
+            logger.info(f"视频 {video_id} 已标记跳过，跳过")
+            continue
+
         logger.info(f"视频 {video_id} 状态={existing_status or '新视频'}，准备处理")
 
         success = await dispatch_video_process(
