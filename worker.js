@@ -625,8 +625,8 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
 
   if (cmd === '/group_list') {
     try {
-      const { results: groups } = await env.BOT_DB.prepare('SELECT * FROM monitor_groups').all();
-      const { results: monitors } = await env.BOT_DB.prepare('SELECT * FROM up_monitors').all();
+      const { results: groups } = await env.BOT_DB.prepare('SELECT id, name, target_channels, ai_caption_style, ai_caption_language, ai_caption_length, promotion_text, generate_ai_caption FROM monitor_groups').all();
+      const { results: monitors } = await env.BOT_DB.prepare('SELECT group_id, up_name, up_url, platform FROM up_monitors').all();
 
       if (groups.length === 0) {
         await sendToTelegram(env.BOT_TOKEN, chatId, '暂无分组');
@@ -643,9 +643,11 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
         lines.push(`   UP主: ${groupMonitors.length} 个`);
 
         if (groupMonitors.length > 0) {
-          for (const m of groupMonitors) {
+          for (const m of groupMonitors.slice(0, 5)) {
             lines.push(`      • ${m.up_name} [${m.platform.toUpperCase()}]`);
-            lines.push(`        ${m.up_url}`);
+          }
+          if (groupMonitors.length > 5) {
+            lines.push(`      ... 还有 ${groupMonitors.length - 5} 个`);
           }
         }
 
