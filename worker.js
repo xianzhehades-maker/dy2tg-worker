@@ -592,52 +592,28 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
 
   if (cmd === '/status') {
     try {
-      const { results: groups } = await env.BOT_DB.prepare('SELECT * FROM monitor_groups').all();
-      const { results: allMonitors } = await env.BOT_DB.prepare('SELECT * FROM up_monitors').all();
-
       const { count: totalPending } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history WHERE status = 'pending'").first() || { count: 0 };
       const { count: totalCompleted } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history WHERE status IN ('completed', 'uploaded')").first() || { count: 0 };
       const { count: totalFailed } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history WHERE status IN ('failed', 'send_failed')").first() || { count: 0 };
       const { count: totalTasks } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM task_history").first() || { count: 0 };
-
-      const lines = ['📊 系统状态\n'];
+      const { count: totalGroups } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM monitor_groups").first() || { count: 0 };
+      const { count: totalMonitors } = await env.BOT_DB.prepare("SELECT COUNT(*) as count FROM up_monitors").first() || { count: 0 };
 
       const globalInterval = await getGlobalConfig(env, 'check_interval');
 
-      lines.push('【全局统计】');
-      lines.push(`📦 总分组数: ${groups.length}`);
-      lines.push(`👁️  总监控UP主: ${allMonitors.length}`);
-      lines.push(`🎬  总任务: ${totalTasks}`);
-      lines.push(`   ⏳ 待处理: ${totalPending}`);
-      lines.push(`   ✅ 已完成: ${totalCompleted}`);
-      lines.push(`   ❌ 失败: ${totalFailed}`);
-      lines.push(`⏱️  全局检查间隔: ${globalInterval || '3600'} 秒`);
-
-      if (groups.length > 0) {
-        lines.push('\n【分组详情】');
-        for (const g of groups) {
-          const channels = parseTargetChannels(g.target_channels);
-          const groupMonitors = allMonitors.filter(m => m.group_id === g.id);
-
-          lines.push(`\n📁 ${g.name} (ID:${g.id})`);
-          lines.push(`   🎯 目标频道: ${channels.length > 0 ? channels.join(', ') : '未设置'}`);
-          lines.push(`   👁️  UP主监控: ${groupMonitors.length} 个`);
-
-          if (groupMonitors.length > 0) {
-            groupMonitors.forEach((m, i) => {
-              lines.push(`      ${i + 1}. ${m.up_name} [${m.platform.toUpperCase()}]`);
-              lines.push(`         ${m.up_url}`);
-            });
-          }
-
-          lines.push(`   🎨 文案风格: ${g.ai_caption_style || 'default'}`);
-          lines.push(`   🌐 文案语言: ${g.ai_caption_language || 'chinese'}`);
-          lines.push(`   📝 文案字数: ${g.ai_caption_length || 200}`);
-          if (g.promotion_text) {
-            lines.push(`   📣 推广文案: ${g.promotion_text}`);
-          }
-        }
-      }
+      const lines = [
+        '📊 系统状态\n',
+        '【全局统计】',
+        `📦 总分组数: ${totalGroups}`,
+        `👁️  总监控UP主: ${totalMonitors}`,
+        `🎬  总任务: ${totalTasks}`,
+        `   ⏳ 待处理: ${totalPending}`,
+        `   ✅ 已完成: ${totalCompleted}`,
+        `   ❌ 失败: ${totalFailed}`,
+        `⏱️  全局检查间隔: ${globalInterval || '3600'} 秒`,
+        '',
+        '查看详细: /group_list'
+      ];
 
       await sendToTelegram(env.BOT_TOKEN, chatId, lines.join('\n'));
     } catch (e) {
