@@ -637,9 +637,19 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
       for (const g of groups) {
         const channels = parseTargetChannels(g.target_channels);
         const groupMonitors = monitors.filter(m => m.group_id === g.id);
-        lines.push(`\n${g.name} (ID:${g.id})`);
+        lines.push(`\n━━━━━━━━━━━━━━━━━`);
+        lines.push(`📁 ${g.name} (ID:${g.id})`);
         lines.push(`   频道: ${channels.length > 0 ? channels.join(', ') : '未设置'}`);
         lines.push(`   UP主: ${groupMonitors.length} 个`);
+
+        if (groupMonitors.length > 0) {
+          for (const m of groupMonitors) {
+            lines.push(`      • ${m.up_name} [${m.platform.toUpperCase()}]`);
+            lines.push(`        ${m.up_url}`);
+          }
+        }
+
+        lines.push(`   AI文案: ${g.generate_ai_caption === 'true' ? '开启' : '关闭'}`);
         lines.push(`   风格: ${g.ai_caption_style || 'default'}`);
         lines.push(`   语言: ${g.ai_caption_language || 'chinese'}`);
         lines.push(`   字数: ${g.ai_caption_length || 200}`);
