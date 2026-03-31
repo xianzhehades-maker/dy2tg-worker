@@ -1490,9 +1490,10 @@ export default {
         const processCallback = async () => {
           if (success && download_url) {
             try {
-              const finalCaption = (video_desc && caption && video_desc !== caption)
-                ? `${video_desc}\n\n---\n\n${caption}`
-                : (caption || video_desc || '视频处理完成');
+              let finalCaption = video_desc || '视频处理完成';
+              if (caption && caption.trim().length > 0) {
+                finalCaption = `${finalCaption}\n\n---\n\n${caption}`;
+              }
 
               let firstMessageId = null;
               let targetChannels = [];
