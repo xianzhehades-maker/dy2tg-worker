@@ -146,6 +146,9 @@ def extract_sec_user_id(url: str) -> str:
     match = re.search(r'/user/([A-Za-z0-9_-]+)', url)
     if match:
         return match.group(1)
+    match = re.search(r'\@([A-Za-z0-9_-]+)', url)
+    if match:
+        return match.group(1)
     return None
 
 
