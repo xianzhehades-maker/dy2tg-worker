@@ -134,6 +134,7 @@ const HELP_TEXT = `🤖 Bot 命令帮助
 【系统】
 /setup - 初始化数据库(首次使用)
 /status - 查看所有分组状态
+/group_list - 查看分组详情
 /queue - 查看待处理队列
 /list_errors - 查看失败任务
 /retry_failed - 重试所有失败任务
@@ -618,6 +619,37 @@ async function handleSingleCommand(env, chatId, cmd, args, fullText, ctx = null)
       await sendToTelegram(env.BOT_TOKEN, chatId, lines.join('\n'));
     } catch (e) {
       await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 获取状态失败: ${e.message}`);
+    }
+    return true;
+  }
+
+  if (cmd === '/group_list') {
+    try {
+      const { results: groups } = await env.BOT_DB.prepare('SELECT * FROM monitor_groups').all();
+      const { results: monitors } = await env.BOT_DB.prepare('SELECT * FROM up_monitors').all();
+
+      if (groups.length === 0) {
+        await sendToTelegram(env.BOT_TOKEN, chatId, '暂无分组');
+        return true;
+      }
+
+      const lines = ['📁 分组列表\n'];
+      for (const g of groups) {
+        const channels = parseTargetChannels(g.target_channels);
+        const groupMonitors = monitors.filter(m => m.group_id === g.id);
+        lines.push(`\n${g.name} (ID:${g.id})`);
+        lines.push(`   频道: ${channels.length > 0 ? channels.join(', ') : '未设置'}`);
+        lines.push(`   UP主: ${groupMonitors.length} 个`);
+        lines.push(`   风格: ${g.ai_caption_style || 'default'}`);
+        lines.push(`   语言: ${g.ai_caption_language || 'chinese'}`);
+        lines.push(`   字数: ${g.ai_caption_length || 200}`);
+        if (g.promotion_text) {
+          lines.push(`   推广: ${g.promotion_text}`);
+        }
+      }
+      await sendToTelegram(env.BOT_TOKEN, chatId, lines.join('\n'));
+    } catch (e) {
+      await sendToTelegram(env.BOT_TOKEN, chatId, `❌ 获取分组失败: ${e.message}`);
     }
     return true;
   }
